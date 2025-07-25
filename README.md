@@ -1,6 +1,6 @@
 # OIer Finder
 
-数据来自 OIer
+数据/代码来自 [OIerDb-ng/OIerDb-data-generator](https://github.com/OIerDb-ng/OIerDb-data-generator)
 
 ## 使用
 
