@@ -1,14 +1,8 @@
-# OIerDb NG Data Generator
+# OIer Finder
 
-本项目中的代码来自 [OIerDb-ng/OIer](https://github.com/OIerDb-ng/OIer/tree/oierdb-ng/model) 仓库，经过部分修改以适配 [OIerDb-ng/OIerDb](https://github.com/OIerDb-ng/OIerDb) 。
+数据来自 OIer
 
 ## 使用
-
-请先安装 Python 3，然后安装依赖：
-
-```bash
-pip install pypinyin requests tqdm
-```
 
 生成数据：
 
@@ -17,6 +11,12 @@ python main.py
 ```
 
 生成好的数据会存储在 `dist` 目录下。
+
+然后使用
+
+```bash
+python oierfinder.py --config sample_conditions.yaml --output results.csv
+```
 
 ## Author
 
