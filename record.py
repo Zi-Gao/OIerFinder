@@ -30,6 +30,68 @@ __grades_range__ = {
 
 class Record:
     __auto_increment__ = 0
+    __all_records_list__ = []  # 新增类变量保存所有记录
+
+    def __getstate__(self):
+        """控制序列化过程，打破循环引用"""
+        state = self.__dict__.copy()
+        # 将对象引用替换为 ID
+        state['oier'] = self.oier.uid if self.oier else None
+        state['contest'] = self.contest.id if self.contest else None
+        state['school'] = self.school.id if self.school else None
+        # 移除可能导致循环引用的属性
+        state.pop('__weakref__', None)
+        return state
+    
+    def __setstate__(self, state):
+        """控制反序列化过程"""
+        self.__dict__.update(state)
+        # 初始化对象引用为 ID
+        # 我们将在反序列化后重建对象引用
+
+    @classmethod
+    def serialize(cls):
+        """序列化所有 Record 数据"""
+        return {
+            'auto_increment': cls.__auto_increment__,
+            'records': [record.__dict__ for record in cls.__all_records_list__]
+        }
+    
+    @classmethod
+    def deserialize(cls, data, oiers, contests, schools):
+        """反序列化 Record 数据"""
+        cls.__auto_increment__ = data['auto_increment']
+        cls.__all_records_list__ = []
+        
+        # 重建 Record 实例
+        for record_data in data['records']:
+            record = object.__new__(cls)
+            record.__dict__.update(record_data)
+            
+            # 重建关联对象
+            if 'oier' in record_data:
+                # 通过 UID 查找 OIer
+                oier_uid = record_data['oier'].uid
+                record.oier = next((o for o in oiers if o.uid == oier_uid), None)
+                if record.oier:
+                    record.oier.records.append(record)
+            
+            if 'contest' in record_data:
+                # 通过 ID 查找 Contest
+                contest_id = record_data['contest'].id
+                record.contest = next((c for c in contests if c.id == contest_id), None)
+            
+            if 'school' in record_data:
+                # 通过 ID 查找 School
+                school_id = record_data['school'].id
+                record.school = next((s for s in schools if s.id == school_id), None)
+            
+            cls.__all_records_list__.append(record)
+
+    @staticmethod
+    def get_all():
+        "获取当前所有记录的列表。"
+        return Record.__all_records_list__
 
     def __init__(self, oier, contest, score, rank, level, grades, school, province, gender):
         Record.__auto_increment__ += 1
@@ -45,6 +107,10 @@ class Record:
         self.gender = gender
         self.ems = util.enrollment_middle(contest, grades)
         self.keep_grade_flag = False
+
+        self.id = Record.__auto_increment__
+        # 将新记录添加到全局列表
+        Record.__all_records_list__.append(self)
 
     def __repr__(self):
         return f"{self.oier.name}(pro={self.province},school={self.school.name},ems={self.ems},c={self.contest.name})"

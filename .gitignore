@@ -1,3 +1,7 @@
 __pycache__/
 .venv/
 dist/
+conditions.yaml
+results.csv
+.DS_Store
+serialized_data.pkl

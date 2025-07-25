@@ -11,7 +11,10 @@ from record import Record
 from school import School
 from sys import argv, stderr
 from tqdm import tqdm
+import pickle
 
+import sys
+sys.setrecursionlimit(10000)
 
 def __main__():
     gender_map = {"男": 1, "女": -1}
@@ -261,17 +264,101 @@ def __main__():
         report_status("尝试合并学校中")
         merge_schools()
 
-    report_status("输出到 dist/result.txt 中")
-    output_compressed()
+    def save_all_data():
+        """序列化并保存所有数据"""
+        # 收集所有数据
+        data = {
+            'schools': School.get_all(),
+            'contests': Contest.get_all(),
+            'oiers': OIer.get_all(),
+            'records': Record.get_all()
+        }
+        
+        # 增加递归深度限制
+        import sys
+        sys.setrecursionlimit(10000)
+        
+        # 保存数据
+        with open('data/serialized_data.pkl', 'wb') as f:
+            pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+        
+        # 验证保存的数据
+        validate_saved_data(data)
+        
+        print("所有数据已序列化保存到 data/serialized_data.pkl")
 
-    report_status("计算 SHA512 摘要中")
-    compute_sha512()
+    def validate_saved_data(data):
+        """验证保存的数据完整性"""
+        print("\n序列化前数据验证:")
+        oiers = data['oiers']
+        records = data['records']
+        
+        # 检查 OIer 的 records 属性
+        oiers_with_id_list = sum(1 for o in oiers if 
+                                isinstance(o.records, list) and 
+                                all(isinstance(rid, int) for rid in o.records))
+        print(f"- 使用ID列表的选手: {oiers_with_id_list}/{len(oiers)}")
+        
+        # 检查 Record 的对象引用
+        records_with_uid = sum(1 for r in records if isinstance(r.oier, int))
+        records_with_cid = sum(1 for r in records if isinstance(r.contest, int))
+        records_with_sid = sum(1 for r in records if isinstance(r.school, int))
+        print(f"- 使用UID引用的记录: {records_with_uid}/{len(records)}")
+        print(f"- 使用比赛ID引用的记录: {records_with_cid}/{len(records)}")
+        print(f"- 使用学校ID引用的记录: {records_with_sid}/{len(records)}")
+        
+        # 检查示例数据
+        if oiers:
+            sample_oier = oiers[0]
+            print(f"\n示例选手: {sample_oier.name}")
+            print(f"  - records 类型: {type(sample_oier.records)}")
+            if sample_oier.records and isinstance(sample_oier.records, list):
+                print(f"  - 第一个记录ID: {sample_oier.records[0]}")
 
-    report_status("输出学校信息中")
-    output_schools()
+    def rebuild_object_references(schools, contests, oiers, records):
+        """重建对象间的引用关系"""
+        # 创建查找字典
+        school_by_id = {s.id: s for s in schools}
+        contest_by_id = {c.id: c for c in contests}
+        oier_by_uid = {o.uid: o for o in oiers}
+        record_by_id = {r.id: r for r in records}
+        
+        # 重建 Record 对象的引用
+        for record in records:
+            # 重建 OIer 引用
+            if record.oier is not None:
+                record.oier = oier_by_uid.get(record.oier)
+            
+            # 重建 Contest 引用
+            if record.contest is not None:
+                record.contest = contest_by_id.get(record.contest)
+            
+            # 重建 School 引用
+            if record.school is not None:
+                record.school = school_by_id.get(record.school)
+        
+        # 重建 OIer 对象的 records 列表
+        for oier in oiers:
+            oier.records = [record_by_id[rid] for rid in oier.records]
+        
+        # 重建 Contest 对象的 contestants 列表
+        for contest in contests:
+            contest.contestants = [record_by_id[rid] for rid in contest.contestants]
 
-    report_status("输出静态 JSON 信息中")
-    update_static()
+    report_status("序列化保存数据中")
+    save_all_data()
+
+    # report_status("输出到 dist/result.txt 中")
+    # output_compressed()
+
+    # report_status("计算 SHA512 摘要中")
+    # compute_sha512()
+
+    # report_status("输出学校信息中")
+    # output_schools()
+
+    # report_status("输出静态 JSON 信息中")
+    # update_static()
 
 
 if __name__ == "__main__":

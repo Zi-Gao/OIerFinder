@@ -11,6 +11,39 @@ class School:
     __school_name_map__ = {}
     __schools_by_pc__ = {}
 
+    def __getstate__(self):
+        """控制序列化过程"""
+        state = self.__dict__.copy()
+        # 移除可能导致循环引用的属性
+        state.pop('__weakref__', None)
+        return state
+    
+    def __setstate__(self, state):
+        """控制反序列化过程"""
+        self.__dict__.update(state)
+
+    @classmethod
+    def serialize(cls):
+        """序列化所有 School 数据"""
+        return {
+            'all_school_list': cls.__all_school_list__,
+            'school_name_map': cls.__school_name_map__,
+            'schools_by_pc': cls.__schools_by_pc__,
+            'schools': [school.__dict__ for school in cls.__all_school_list__]
+        }
+    
+    @classmethod
+    def deserialize(cls, data):
+        """反序列化 School 数据"""
+        cls.__all_school_list__ = data['all_school_list']
+        cls.__school_name_map__ = data['school_name_map']
+        cls.__schools_by_pc__ = data['schools_by_pc']
+        
+        # 重建 School 实例
+        for school_data in data['schools']:
+            school = object.__new__(cls)
+            school.__dict__.update(school_data)
+
     def __init__(self, idx, name, province, city, aliases):
         self.id = idx
         self.name = name

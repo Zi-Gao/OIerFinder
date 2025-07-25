@@ -13,6 +13,48 @@ class Contest:
     __all_contests_list__ = []
     __all_contests_map__ = {}
 
+    def __getstate__(self):
+        """控制序列化过程，打破循环引用"""
+        state = self.__dict__.copy()
+        # 将 contestants 替换为记录 ID 列表
+        state['contestants'] = [record.id for record in self.contestants]
+        # 移除可能导致循环引用的属性
+        state.pop('__weakref__', None)
+        return state
+    
+    def __setstate__(self, state):
+        """控制反序列化过程"""
+        self.__dict__.update(state)
+        # 初始化 contestants 列表为 ID 列表
+        # 我们将在反序列化后重建对象引用
+
+    @classmethod
+    def serialize(cls):
+        """序列化所有 Contest 数据"""
+        return {
+            'all_contests_list': cls.__all_contests_list__,
+            'all_contests_map': cls.__all_contests_map__,
+            'contests': [contest.__dict__ for contest in cls.__all_contests_list__]
+        }
+    
+    @classmethod
+    def deserialize(cls, data):
+        """反序列化 Contest 数据"""
+        cls.__all_contests_list__ = data['all_contests_list']
+        cls.__all_contests_map__ = data['all_contests_map']
+        
+        # 重建 Contest 实例
+        for contest_data in data['contests']:
+            contest = object.__new__(cls)
+            contest.__dict__.update(contest_data)
+            # 重建 contestants 列表（暂时为空）
+            contest.contestants = []
+
+    @staticmethod
+    def get_all():
+        "获取当前所有竞赛的列表。"
+        return Contest.__all_contests_list__
+
     def __init__(self, idx, settings):
         self.id = idx
         self.name = settings["name"]

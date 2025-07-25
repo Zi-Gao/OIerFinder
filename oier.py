@@ -18,6 +18,47 @@ class OIer:
     __all_oiers_list__ = []
     __all_oiers_map__ = {}
 
+    def __getstate__(self):
+        """控制序列化过程，打破循环引用"""
+        state = self.__dict__.copy()
+        # 将 records 替换为记录 ID 列表
+        state['records'] = [record.id for record in self.records]
+        # 移除可能导致循环引用的属性
+        state.pop('__weakref__', None)
+        return state
+    
+    def __setstate__(self, state):
+        """控制反序列化过程"""
+        self.__dict__.update(state)
+        # 初始化 records 列表为 ID 列表
+        # 我们将在反序列化后重建对象引用
+        
+    @classmethod
+    def serialize(cls):
+        """序列化所有 OIer 数据"""
+        data = {
+            'all_oiers_list': cls.__all_oiers_list__,
+            'all_oiers_map': cls.__all_oiers_map__,
+            'oiers': [oier.__dict__ for oier in cls.__all_oiers_list__],
+            'records': [record.id for oier in cls.__all_oiers_list__ for record in oier.records]
+        }
+        return data
+    
+    @classmethod
+    def deserialize(cls, data):
+        """反序列化 OIer 数据"""
+        cls.__all_oiers_list__ = data['all_oiers_list']
+        cls.__all_oiers_map__ = data['all_oiers_map']
+        
+        # 重建 OIer 实例
+        for oier_data in data['oiers']:
+            oier = object.__new__(cls)
+            oier.__dict__.update(oier_data)
+            # 重建 records 列表（暂时为空）
+            oier.records = []
+        
+        return data['records']  # 返回需要重建的record IDs
+
     def __init__(self, name, identifier, gender, em, uid):
         self.name = name
         self.identifier = identifier
