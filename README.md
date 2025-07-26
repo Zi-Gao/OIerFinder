@@ -18,6 +18,12 @@ python main.py
 python oierfinder.py --config sample_conditions.yaml --output results.csv
 ```
 
+将洛谷的的奖项认证格式化为 `conditions.yaml` 格式：
+
+```bash
+python format_lgawards.py -i sample_lgawards.txt -o conditions.yaml
+```
+
 ## Author
 
 **OIerDb NG Data Generator** © [Baoshuo](https://github.com/renbaoshuo), Released under the [AGPL-3.0](./LICENSE) License.<br>
