@@ -1,0 +1,3 @@
+[submodule "oierdb-data"]
+	path = oierdb-data
+	url = git@github.com:OIerDb-ng/OIerDb-data-generator.git
