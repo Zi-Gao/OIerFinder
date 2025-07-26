@@ -37,7 +37,7 @@ def __main__():
     def parse_school():
         "解析 school.txt 文件。"
 
-        with open("data/school.txt") as f:
+        with open("oierdb-data/data/school.txt") as f:
             raw_data = f.readlines()
         for idx, line in tqdm(enumerate(raw_data), total=len(raw_data)):
             try:
@@ -82,7 +82,7 @@ def __main__():
     def parse_raw():
         "解析 raw.txt 文件。"
 
-        with open("data/raw.txt") as f:
+        with open("oierdb-data/data/raw.txt") as f:
             raw_data = f.readlines()
         for idx, line in tqdm(enumerate(raw_data), total=len(raw_data)):
             try:
@@ -162,7 +162,7 @@ def __main__():
 
         nonlocal new_schools
         new_schools = sorted(set(new_schools))
-        with open("dist/merge_preview.txt", "w") as f:
+        with open("oierdb-data/dist/merge_preview.txt", "w") as f:
             print(
 """# 用 '#' 号表示注释。
 # 这是由 main.py 自动生成的学校合并确认文件，本文件的格式有如下几种：
@@ -229,7 +229,7 @@ def __main__():
         （注：使用 *.txt 后缀可以利用 gzip 压缩）
         """
 
-        file_size = os.stat("dist/result.txt").st_size
+        file_size = os.stat("oierdb-data/dist/result.txt").st_size
 
         with open("dist/result.txt", "rb") as f:
             sha512 = hashlib.sha512(f.read()).hexdigest()
