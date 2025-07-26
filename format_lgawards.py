@@ -44,7 +44,6 @@ def parse_awards(input_text):
     return awards
 
 def standardize_contest_name(contest):
-    print("!!",contest,"!!")
     """标准化比赛名称"""
     # 映射表
     contest_map = {
@@ -79,7 +78,7 @@ def format_conditions(awards):
         standardized_contest = standardize_contest_name(contest)
         
         conditions.append({
-            'year': int(year),
+            'year_range': [int(year),int(year)],
             'contest_type': standardized_contest,
             'award': award
         })
