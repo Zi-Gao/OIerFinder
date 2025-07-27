@@ -315,36 +315,6 @@ def __main__():
             if sample_oier.records and isinstance(sample_oier.records, list):
                 print(f"  - 第一个记录ID: {sample_oier.records[0]}")
 
-    def rebuild_object_references(schools, contests, oiers, records):
-        """重建对象间的引用关系"""
-        # 创建查找字典
-        school_by_id = {s.id: s for s in schools}
-        contest_by_id = {c.id: c for c in contests}
-        oier_by_uid = {o.uid: o for o in oiers}
-        record_by_id = {r.id: r for r in records}
-        
-        # 重建 Record 对象的引用
-        for record in records:
-            # 重建 OIer 引用
-            if record.oier is not None:
-                record.oier = oier_by_uid.get(record.oier)
-            
-            # 重建 Contest 引用
-            if record.contest is not None:
-                record.contest = contest_by_id.get(record.contest)
-            
-            # 重建 School 引用
-            if record.school is not None:
-                record.school = school_by_id.get(record.school)
-        
-        # 重建 OIer 对象的 records 列表
-        for oier in oiers:
-            oier.records = [record_by_id[rid] for rid in oier.records]
-        
-        # 重建 Contest 对象的 contestants 列表
-        for contest in contests:
-            contest.contestants = [record_by_id[rid] for rid in contest.contestants]
-
     report_status("序列化保存数据中")
     save_all_data()
 

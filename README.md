@@ -4,29 +4,41 @@
 
 ## 使用
 
-生成数据：
+安装依赖
 
 ```bash
-python main.py
+pip install -r requirements.txt
 ```
 
-生成好的数据会存储在 `dist` 目录下。
+### oierfinder
 
-然后使用
+用于筛选出 OIer。
 
 ```bash
 python oierfinder.py --config sample_conditions.yaml --output results.csv
 ```
 
-将洛谷的的奖项认证格式化为 `conditions.yaml` 格式：
+### format_lgawards
+
+
+用于将洛谷的的奖项认证格式化为 `conditions.yaml` 格式：
 
 ```bash
 python format_lgawards.py -i sample_lgawards.txt -o conditions.yaml
 ```
 
-## Author
+### generate_data
 
-**OIerDb NG Data Generator** © [Baoshuo](https://github.com/renbaoshuo), Released under the [AGPL-3.0](./LICENSE) License.<br>
-Authored and maintained by Baoshuo with help from [OIerDb-ng/OIer](https://github.com/OIerDb-ng/OIer) and [contributors](https://github.com/OIerDb-ng/OIerDb/contributors).
+用于生成/更新 OIer 的数据。
 
-> [Personal Website](https://baoshuo.ren) · [Blog](https://blog.baoshuo.ren) · GitHub [@renbaoshuo](https://github.com/renbaoshuo) · Twitter [@renbaoshuo](https://twitter.com/renbaoshuo)
+首先更新 [OIerDb-ng/OIerDb-data-generator](https://github.com/OIerDb-ng/OIerDb-data-generator) 子仓库
+
+```bash
+git submodule update --init --recursive
+```
+
+然后
+
+```bash
+python generate_data.py
+```
