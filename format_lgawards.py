@@ -56,6 +56,8 @@ def standardize_contest_name(contest):
         'NOI夏令营': 'NOID类',
         'NOI 夏令营': 'NOID类',
         'APIO': 'APIO',
+        'APIO 线上': 'APIO',
+        'APIO线上': 'APIO',
         'CTSC': 'CTSC',
         'NOI': 'NOI',
         'NOIP': 'NOIP',
