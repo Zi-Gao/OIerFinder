@@ -107,70 +107,24 @@ def load_data(data_file):
         'records': records
     }
 
-def parse_conditions(config_file):
-    """解析 YAML 配置文件中的筛选条件"""
-    try:
-        with open(config_file, 'r') as f:
-            config = yaml.safe_load(f)
-    except FileNotFoundError:
-        print(f"错误: 配置文件 {config_file} 不存在")
-        return None
-    except yaml.YAMLError as e:
-        print(f"解析 YAML 失败: {e}")
-        return None
-    
-    # 验证配置结构
-    if 'conditions' not in config:
-        print("错误: 配置文件中缺少 'conditions' 部分")
-        return None
-    
-    conditions = []
-    
-    for cond in config['conditions']:
-        # 验证必需字段
-        if 'contest_type' not in cond:
-            print("错误: 条件缺少 'contest_type' 字段")
-            continue
-        
-        # 创建条件字典
-        condition = {
-            'contest_type': cond['contest_type'],
-            'award': cond.get('award'),
-            'min_award': cond.get('min_award'),
-            'year_range': cond.get('year_range', []),
-            'province': cond.get('province'),
-            'school': cond.get('school'),
-            'gender': cond.get('gender')
-        }
-        
-        # 验证年份范围
-        if condition['year_range'] and len(condition['year_range']) != 2:
-            print(f"警告: 无效的年份范围 {condition['year_range']}, 应包含两个年份")
-            condition['year_range'] = []
-        
-        conditions.append(condition)
-    
-    # 添加全局逻辑
-    global_logic = {
-        'mode': config.get('logic', 'all'),
-        'limit': config.get('limit', 0),
-        'output_fields': config.get('output_fields', ['name', 'records'])
-    }
-    
-    return conditions, global_logic
-
 def match_condition(record, condition):
     """检查记录是否满足单个条件"""
+    # 确保condition是字典
+    if not isinstance(condition, dict):
+        return False
+    
     # 检查比赛类型
+    if 'contest_type' not in condition:
+        return False
     if record.contest.type != condition['contest_type']:
         return False
     
     # 检查奖项
-    if condition['award'] and record.level != condition['award']:
+    if condition.get('award') and record.level != condition['award']:
         return False
     
     # 检查最低奖项
-    if condition['min_award']:
+    if condition.get('min_award'):
         award_levels = {
             "金牌": 5, "银牌": 4, "铜牌": 3, 
             "一等奖": 3, "二等奖": 2, "三等奖": 1
@@ -181,21 +135,21 @@ def match_condition(record, condition):
             return False
     
     # 检查年份范围
-    if condition['year_range']:
+    if condition.get('year_range') and len(condition['year_range']) == 2:
         start_year, end_year = condition['year_range']
         if not (start_year <= record.contest.year <= end_year):
             return False
     
     # 检查省份
-    if condition['province'] and record.province != condition['province']:
+    if condition.get('province') and record.province != condition['province']:
         return False
     
     # 检查学校
-    if condition['school'] and record.school.name != condition['school']:
+    if condition.get('school') and record.school.name != condition['school']:
         return False
     
     # 检查性别
-    if condition['gender']:
+    if condition.get('gender'):
         gender_map = {"男": 1, "女": -1, "其他": 0}
         gender_value = gender_map.get(condition['gender'], 0)
         if record.gender != gender_value:
@@ -206,8 +160,8 @@ def match_condition(record, condition):
 def find_oiers_by_conditions(conditions, logic, oiers):
     """根据条件筛选选手"""
     results = []
-    mode = logic['mode']  # 'all' 或 'any'
-    limit = logic['limit']  # 结果数量限制
+    mode = logic.get('mode', 'all')  # 'all' 或 'any'
+    limit = logic.get('limit', 0)  # 结果数量限制
     
     for oier in oiers:
         # 检查是否满足条件
@@ -216,6 +170,10 @@ def find_oiers_by_conditions(conditions, logic, oiers):
         
         # 检查每个条件
         for idx, condition in enumerate(conditions):
+            # 确保condition是字典
+            if not isinstance(condition, dict):
+                continue
+                
             for record in oier.records:
                 if match_condition(record, condition):
                     matches += 1
@@ -234,131 +192,51 @@ def find_oiers_by_conditions(conditions, logic, oiers):
     
     return results
 
-def format_output(oier, matched_records, conditions, output_fields):
-    """格式化输出单个选手的结果"""
-    output = {}
+def find_oiers_by_yaml_config(config, data_file):
+    """根据YAML配置查询OIer"""
+    # 加载数据
+    data = load_data(data_file)
+    if not data:
+        raise Exception("无法加载数据")
     
-    # 基本字段
-    if 'name' in output_fields:
-        output['name'] = oier.name
-    if 'uid' in output_fields:
-        output['uid'] = oier.uid
-    if 'enroll_middle' in output_fields:
-        output['enroll_middle'] = oier.enroll_middle
-    if 'oierdb_score' in output_fields and hasattr(oier, 'oierdb_score'):
-        output['oierdb_score'] = float(oier.oierdb_score)
-    if 'ccf_score' in output_fields and hasattr(oier, 'ccf_score'):
-        output['ccf_score'] = float(oier.ccf_score)
-    if 'ccf_level' in output_fields and hasattr(oier, 'ccf_level'):
-        output['ccf_level'] = oier.ccf_level
+    # 检查配置是否为字典
+    if not isinstance(config, dict):
+        raise Exception(f"配置格式错误：期望字典格式，实际得到 {type(config).__name__}")
     
-    # 匹配的记录
-    if 'matched_records' in output_fields:
-        output['matched_records'] = {}
-        for idx, record in matched_records.items():
-            cond = conditions[idx]
-            record_info = {
-                'contest_name': record.contest.name,
-                'contest_type': record.contest.type,
-                'year': record.contest.year,
-                'award': record.level,
-                'score': record.score,
-                'rank': record.rank,
-                'province': record.province,
-                'school': record.school.name if record.school else None
-            }
-            output['matched_records'][idx] = record_info
+    # 获取条件
+    conditions = config.get('conditions', [])
+    logic = config.get('logic', {})
     
-    # 所有记录
-    if 'all_records' in output_fields:
-        output['all_records'] = []
-        for record in oier.records:
-            record_info = {
-                'contest_name': record.contest.name,
-                'contest_type': record.contest.type,
-                'year': record.contest.year,
-                'award': record.level,
-                'score': record.score,
-                'rank': record.rank,
-                'province': record.province,
-                'school': record.school.name if record.school else None
-            }
-            output['all_records'].append(record_info)
+    # 检查条件是否为列表
+    if not isinstance(conditions, list):
+        raise Exception(f"conditions 应该是一个列表，实际得到 {type(conditions).__name__}")
     
-    return output
-
-def print_results(results, conditions, logic):
-    """打印筛选结果"""
-    if not results:
-        print("\n没有找到满足条件的选手")
-        return
-    
-    mode_str = "所有" if logic['mode'] == 'all' else "任一"
-    print(f"\n找到 {len(results)} 位满足{mode_str}条件的选手:")
-    
-    for oier, matched_records in results:
-        print(f"\n选手: {oier.name} (UID: {oier.uid}, 入学年份: {oier.enroll_middle})")
+    # 检查每个条件是否为字典
+    for i, condition in enumerate(conditions):
+        if not isinstance(condition, dict):
+            raise Exception(f"条件 {i+1} 应该是一个字典，实际得到 {type(condition).__name__}")
         
-        # 打印匹配的记录
-        print("满足条件的比赛记录:")
-        for idx, record in matched_records.items():
-            cond = conditions[idx]
-            cond_desc = f"条件{idx+1}: {cond['contest_type']}"
-            if cond['award']:
-                cond_desc += f"({cond['award']})"
-            elif cond['min_award']:
-                cond_desc += f"({cond['min_award']}及以上)"
-            
-            print(f"  - {cond_desc}: {record.contest.name} ({record.contest.year}年) "
-                  f"奖项: {record.level}, 分数: {record.score}, 排名: {record.rank}")
+        # 确保 contest_type 存在且为字符串
+        if 'contest_type' not in condition:
+            raise Exception(f"条件 {i+1} 缺少 contest_type 字段")
         
-        print("-" * 80)
-
-def export_to_csv(results, conditions, logic, filename):
-    """将结果导出为CSV文件"""
-    import csv
+        if not isinstance(condition['contest_type'], str):
+            raise Exception(f"条件 {i+1} 的 contest_type 应该是字符串")
     
-    with open(filename, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        
-        # 写入标题行
-        headers = ['选手姓名', 'UID', '入学年份', 'DB评分', 'CCF评分', 'CCF等级']
-        for idx in range(len(conditions)):
-            headers.append(f'条件{idx+1}_比赛')
-            headers.append(f'条件{idx+1}_年份')
-            headers.append(f'条件{idx+1}_奖项')
-            headers.append(f'条件{idx+1}_分数')
-            headers.append(f'条件{idx+1}_排名')
-        writer.writerow(headers)
-        
-        # 写入数据行
-        for oier, matched_records in results:
-            row = [
-                oier.name,
-                oier.uid,
-                oier.enroll_middle,
-                getattr(oier, 'oierdb_score', ''),
-                getattr(oier, 'ccf_score', ''),
-                getattr(oier, 'ccf_level', '')
-            ]
-            
-            # 为每个条件添加匹配记录信息
-            for idx in range(len(conditions)):
-                if idx in matched_records:
-                    record = matched_records[idx]
-                    row.extend([
-                        record.contest.name,
-                        record.contest.year,
-                        record.level,
-                        record.score,
-                        record.rank
-                    ])
-                else:
-                    row.extend(['', '', '', '', ''])
-            
-            writer.writerow(row)
+    # 检查逻辑配置
+    if not isinstance(logic, dict):
+        raise Exception(f"logic 应该是一个字典，实际得到 {type(logic).__name__}")
     
-    print(f"\n结果已导出到 {filename}")
+    # 确保logic有默认值
+    if 'mode' not in logic:
+        logic['mode'] = 'all'
+    if 'limit' not in logic:
+        logic['limit'] = 0
+    
+    # 筛选选手
+    results = find_oiers_by_conditions(conditions, logic, data['oiers'])
+    
+    return results
 
 def main():
     # 设置命令行参数
@@ -371,31 +249,33 @@ def main():
     args = parser.parse_args()
     
     # 解析配置条件
-    config = parse_conditions(args.config)
-    if not config:
+    try:
+        with open(args.config, 'r') as f:
+            config = yaml.safe_load(f)
+    except Exception as e:
+        print(f"解析YAML配置失败: {e}")
         return
-    
-    conditions, logic = config
     
     # 打印条件摘要
     print("\n筛选条件:")
-    for idx, cond in enumerate(conditions):
+    for idx, cond in enumerate(config.get('conditions', [])):
         cond_desc = f"{idx+1}. 比赛类型: {cond['contest_type']}"
-        if cond['award']:
+        if 'award' in cond and cond['award']:
             cond_desc += f", 奖项: {cond['award']}"
-        elif cond['min_award']:
+        elif 'min_award' in cond and cond['min_award']:
             cond_desc += f", 最低奖项: {cond['min_award']}"
-        if cond['year_range']:
+        if 'year_range' in cond and cond['year_range']:
             cond_desc += f", 年份范围: {cond['year_range'][0]}-{cond['year_range'][1]}"
-        if cond['province']:
+        if 'province' in cond and cond['province']:
             cond_desc += f", 省份: {cond['province']}"
-        if cond['school']:
+        if 'school' in cond and cond['school']:
             cond_desc += f", 学校: {cond['school']}"
-        if cond['gender']:
+        if 'gender' in cond and cond['gender']:
             cond_desc += f", 性别: {cond['gender']}"
         print(f"  - {cond_desc}")
     
-    print(f"逻辑模式: {logic['mode']}, 结果限制: {logic['limit']}")
+    logic = config.get('logic', {})
+    print(f"逻辑模式: {logic.get('mode', 'all')}, 结果限制: {logic.get('limit', 0)}")
     
     # 加载数据
     print(f"\n正在从 {args.data} 加载数据...")
@@ -406,17 +286,70 @@ def main():
     print(f"数据加载成功! 选手数量: {len(data['oiers'])}, 比赛数量: {len(data['contests'])}")
     
     # 筛选选手
-    results = find_oiers_by_conditions(conditions, logic, data['oiers'])
+    results = find_oiers_by_yaml_config(config, args.data)
     
     # 输出结果
     print(f"\n找到 {len(results)} 位满足条件的选手")
     
     if args.debug:
-        print_results(results, conditions, logic)
+        for oier, matched_records in results:
+            print(f"\n选手: {oier.name} (UID: {oier.uid}, 入学年份: {oier.enroll_middle})")
+            print("满足条件的比赛记录:")
+            for idx, record in matched_records.items():
+                cond = config['conditions'][idx]
+                cond_desc = f"条件{idx+1}: {cond['contest_type']}"
+                if 'award' in cond and cond['award']:
+                    cond_desc += f"({cond['award']})"
+                elif 'min_award' in cond and cond['min_award']:
+                    cond_desc += f"({cond['min_award']}及以上)"
+                
+                print(f"  - {cond_desc}: {record.contest.name} ({record.contest.year}年) "
+                      f"奖项: {record.level}, 分数: {record.score}, 排名: {record.rank}")
     
     # 导出结果
     if args.output:
-        export_to_csv(results, conditions, logic, args.output)
+        import csv
+        with open(args.output, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            
+            # 写入标题行
+            headers = ['选手姓名', 'UID', '入学年份', 'DB评分', 'CCF评分', 'CCF等级']
+            for idx in range(len(config.get('conditions', []))):
+                headers.append(f'条件{idx+1}_比赛')
+                headers.append(f'条件{idx+1}_年份')
+                headers.append(f'条件{idx+1}_奖项')
+                headers.append(f'条件{idx+1}_分数')
+                headers.append(f'条件{idx+1}_排名')
+            writer.writerow(headers)
+            
+            # 写入数据行
+            for oier, matched_records in results:
+                row = [
+                    oier.name,
+                    oier.uid,
+                    oier.enroll_middle,
+                    getattr(oier, 'oierdb_score', ''),
+                    getattr(oier, 'ccf_score', ''),
+                    getattr(oier, 'ccf_level', '')
+                ]
+                
+                # 为每个条件添加匹配记录信息
+                for idx in range(len(config.get('conditions', []))):
+                    if idx in matched_records:
+                        record = matched_records[idx]
+                        row.extend([
+                            record.contest.name,
+                            record.contest.year,
+                            record.level,
+                            record.score,
+                            record.rank
+                        ])
+                    else:
+                        row.extend(['', '', '', '', ''])
+                
+                writer.writerow(row)
+        
+        print(f"\n结果已导出到 {args.output}")
     else:
         # 默认输出前10位选手的摘要
         print("\n前10位满足条件的选手:")
@@ -426,5 +359,5 @@ def main():
         if len(results) > 10:
             print(f"... 以及另外 {len(results)-10} 位选手")
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

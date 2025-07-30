@@ -5,3 +5,5 @@ conditions.yaml
 results.csv
 .DS_Store
 lgawards.txt
+uploads
+tmp

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>格式化结果 - OIer 数据查询系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <a href="{{ url_for('index') }}" class="back-link">&larr; 返回首页</a>
+        
+        <h1>格式化结果</h1>
+        
+        <div class="result-section">
+            <h2>解析到的奖项</h2>
+            <div class="awards-list">
+                <ul>
+                    {% for year, contest, award in awards %}
+                    <li>{{ year }}年 - {{ contest }} - {{ award }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+        
+        <div class="result-section">
+            <h2>生成的YAML配置</h2>
+            <form method="POST" action="{{ url_for('query_from_format') }}">
+                <input type="hidden" name="yaml_content" value="{{ yaml_content|e }}">
+                <pre class="yaml-output">{{ yaml_content }}</pre>
+                <button type="submit" class="btn">直接查询</button>
+                <a href="{{ url_for('download_yaml', filename=temp_yaml) }}" class="btn btn-secondary">下载YAML</a>
+                <a href="{{ url_for('query', yaml_content=yaml_content) }}" class="btn btn-secondary">手动查询</a>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

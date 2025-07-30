@@ -67,7 +67,7 @@ def standardize_contest_name(contest):
     
     # 尝试匹配映射表
     for key, value in contest_map.items():
-        if key==contest:
+        if key == contest:
             return value
     
     # 如果没有匹配到，返回原始名称
@@ -80,7 +80,7 @@ def format_conditions(awards):
         standardized_contest = standardize_contest_name(contest)
         
         conditions.append({
-            'year_range': [int(year),int(year)],
+            'year_range': [int(year), int(year)],
             'contest_type': standardized_contest,
             'award': award
         })

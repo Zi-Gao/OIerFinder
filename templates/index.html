@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OIer 查询系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .feature-card {
+            transition: transform 0.3s ease;
+            height: 100%;
+        }
+        .feature-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+        .hero {
+            background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+            color: white;
+            padding: 100px 0;
+            text-align: center;
+        }
+        .hero h1 {
+            font-size: 3rem;
+            margin-bottom: 20px;
+        }
+        .hero p {
+            font-size: 1.2rem;
+            max-width: 700px;
+            margin: 0 auto;
+        }
+        .section {
+            padding: 80px 0;
+        }
+        .section-title {
+            text-align: center;
+            margin-bottom: 60px;
+        }
+        .section-title h2 {
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+        }
+        .section-title p {
+            color: #6c757d;
+            max-width: 700px;
+            margin: 0 auto;
+        }
+        footer {
+            background-color: #f8f9fa;
+            padding: 40px 0;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <!-- Hero Section -->
+    <div class="hero">
+        <div class="container">
+            <h1>OIer 查询系统</h1>
+            <p>一站式信息学竞赛选手查询工具，支持洛谷奖项格式化和高级筛选查询</p>
+            <a href="#features" class="btn btn-light btn-lg mt-4">了解更多</a>
+        </div>
+    </div>
+
+    <!-- Features Section -->
+    <div id="features" class="section">
+        <div class="container">
+            <div class="section-title">
+                <h2>系统功能</h2>
+                <p>提供专业的信息学竞赛选手查询和分析服务</p>
+            </div>
+            <div class="row">
+                <div class="col-md-4 mb-4">
+                    <div class="card feature-card">
+                        <div class="card-body text-center">
+                            <div class="mb-4">
+                                <i class="bi bi-file-earmark-text" style="font-size: 3rem; color: #6a11cb;"></i>
+                            </div>
+                            <h5 class="card-title">洛谷奖项格式化</h5>
+                            <p class="card-text">将洛谷奖项认证文本转换为标准YAML配置，便于后续查询和分析</p>
+                            <a href="{{ url_for('format_lgawards_route') }}" class="btn btn-primary">开始使用</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-4">
+                    <div class="card feature-card">
+                        <div class="card-body text-center">
+                            <div class="mb-4">
+                                <i class="bi bi-search" style="font-size: 3rem; color: #2575fc;"></i>
+                            </div>
+                            <h5 class="card-title">高级筛选查询</h5>
+                            <p class="card-text">通过YAML配置或UI界面设置复杂筛选条件，精确查找目标选手</p>
+                            <a href="{{ url_for('find_oiers') }}" class="btn btn-primary">开始查询</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-4">
+                    <div class="card feature-card">
+                        <div class="card-body text-center">
+                            <div class="mb-4">
+                                <i class="bi bi-arrow-repeat" style="font-size: 3rem; color: #28a745;"></i>
+                            </div>
+                            <h5 class="card-title">无缝集成</h5>
+                            <p class="card-text">格式化后的奖项可直接导入查询功能，实现一站式选手筛选</p>
+                            <a href="{{ url_for('format_lgawards_route') }}" class="btn btn-primary">立即体验</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- How It Works Section -->
+    <div class="section bg-light">
+        <div class="container">
+            <div class="section-title">
+                <h2>使用流程</h2>
+                <p>简单三步，快速找到您需要的选手信息</p>
+            </div>
+            <div class="row">
+                <div class="col-md-4 mb-4 text-center">
+                    <div class="step-circle mb-3">
+                        <span class="step-number">1</span>
+                    </div>
+                    <h5>格式化奖项</h5>
+                    <p>将洛谷奖项认证文本粘贴到系统，自动转换为标准YAML配置</p>
+                </div>
+                <div class="col-md-4 mb-4 text-center">
+                    <div class="step-circle mb-3">
+                        <span class="step-number">2</span>
+                    </div>
+                    <h5>配置查询条件</h5>
+                    <p>使用生成的YAML配置或通过UI界面设置筛选条件</p>
+                </div>
+                <div class="col-md-4 mb-4 text-center">
+                    <div class="step-circle mb-3">
+                        <span class="step-number">3</span>
+                    </div>
+                    <h5>获取结果</h5>
+                    <p>系统返回满足条件的选手列表，包含详细比赛记录和评分</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <p class="mb-0">© 2023 OIer 查询系统 | 基于Flask构建</p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <style>
+        .step-circle {
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto;
+        }
+        .step-number {
+            color: white;
+            font-size: 2rem;
+            font-weight: bold;
+        }
+    </style>
+</body>
+</html>
