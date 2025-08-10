@@ -4,3 +4,4 @@ dist/
 luogu_awards.txt
 config.yml
 .DS_Store
+*.db
