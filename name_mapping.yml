@@ -1,0 +1,25 @@
+# 洛谷名称到标准名称的映射
+
+# 比赛名称映射
+# 键是洛谷比赛名中的关键词，值是数据库中对应的比赛类型(contest.type)
+# 脚本会按顺序查找关键词，找到第一个匹配的就使用。
+# 因此，请把更具体的名称放在前面 (例如 'NOIP 提高组' 在 'NOIP' 之前)。
+contest_mapping:
+  "CSP-J": "CSP入门"
+  "CSP-S": "CSP提高"
+  "NOIP 普及组": "NOIP普及"
+  "NOIP 提高组": "NOIP提高"
+  "NOIP": "NOIP"
+  "NOI 冬令营": "WC"
+  "NOI 夏令营": "NOID类"
+  "NOI": "NOI"
+  "APIO": "APIO"
+  "APIO 线上": "APIO"
+  "CTSC": "CTSC"
+level_mapping:
+  "金牌": "金牌"
+  "银牌": "银牌"
+  "铜牌": "铜牌"
+  "一等奖": "一等奖"
+  "二等奖": "二等奖"
+  "三等奖": "三等奖"

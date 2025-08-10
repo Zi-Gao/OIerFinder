@@ -1,9 +1,6 @@
 __pycache__/
 .venv/
 dist/
-conditions.yaml
-results.csv
+luogu_awards.txt
+config.yml
 .DS_Store
-lgawards.txt
-uploads
-tmp

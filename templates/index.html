@@ -1,175 +1,112 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OIer 查询系统</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        .feature-card {
-            transition: transform 0.3s ease;
-            height: 100%;
-        }
-        .feature-card:hover {
-            transform: translateY(-10px);
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-        }
-        .hero {
-            background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
-            color: white;
-            padding: 100px 0;
-            text-align: center;
-        }
-        .hero h1 {
-            font-size: 3rem;
-            margin-bottom: 20px;
-        }
-        .hero p {
-            font-size: 1.2rem;
-            max-width: 700px;
-            margin: 0 auto;
-        }
-        .section {
-            padding: 80px 0;
-        }
-        .section-title {
-            text-align: center;
-            margin-bottom: 60px;
-        }
-        .section-title h2 {
-            font-size: 2.5rem;
-            margin-bottom: 20px;
-        }
-        .section-title p {
-            color: #6c757d;
-            max-width: 700px;
-            margin: 0 auto;
-        }
-        footer {
-            background-color: #f8f9fa;
-            padding: 40px 0;
-            text-align: center;
-        }
-    </style>
-</head>
-<body>
-    <!-- Hero Section -->
-    <div class="hero">
-        <div class="container">
-            <h1>OIer 查询系统</h1>
-            <p>一站式信息学竞赛选手查询工具，支持洛谷奖项格式化和高级筛选查询</p>
-            <a href="#features" class="btn btn-light btn-lg mt-4">了解更多</a>
-        </div>
+{% extends "base.html" %}
+{% block content %}
+<div class="mb-4">
+    <h1>OIer 查询器</h1>
+    <p class="lead">通过不同方式构建查询条件，寻找符合要求的 OIer。</p>
+</div>
+
+<ul class="nav nav-tabs" id="myTab" role="tablist">
+    <li class="nav-item" role="presentation"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#ui-pane" type="button">UI 查询</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#yaml-pane" type="button">YAML 查询</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#luogu-pane" type="button">洛谷奖项查询</button></li>
+</ul>
+
+<div class="tab-content pt-3" id="myTabContent">
+    <!-- UI 查询面板 -->
+    <div class="tab-pane fade show active" id="ui-pane" role="tabpanel">
+        <form action="/" method="post">
+            <input type="hidden" name="query_type" value="ui">
+            <h5>选手基本信息</h5>
+            <div class="row g-3 mb-3">
+                <div class="col-sm-6">
+                    <label class="form-label">初中入学年份区间</label>
+                    <div class="input-group">
+                        <input type="number" class="form-control" name="enroll_min" placeholder="最早年份">
+                        <span class="input-group-text">-</span>
+                        <input type="number" class="form-control" name="enroll_max" placeholder="最晚年份">
+                    </div>
+                </div>
+                <div class="col-sm-6">
+                    <label class="form-label">当前年级区间 <small>(小学1-6, 初中7-9, 高中10-12)</small></label>
+                    <div class="input-group">
+                        <input type="number" class="form-control" name="grade_min" placeholder="最低年级">
+                        <span class="input-group-text">-</span>
+                        <input type="number" class="form-control" name="grade_max" placeholder="最高年级">
+                    </div>
+                </div>
+            </div>
+            
+            <h5>比赛记录条件 <small>(选手需满足所有条件)</small></h5>
+            <div id="record-conditions-container">
+                <!-- 动态记录条件将插入此处 -->
+            </div>
+            <button type="button" class="btn btn-outline-success btn-sm mt-2" id="add-record-btn">添加记录条件</button>
+            <hr>
+            <button class="btn btn-primary btn-lg" type="submit">开始查询</button>
+        </form>
     </div>
 
-    <!-- Features Section -->
-    <div id="features" class="section">
-        <div class="container">
-            <div class="section-title">
-                <h2>系统功能</h2>
-                <p>提供专业的信息学竞赛选手查询和分析服务</p>
+    <!-- YAML 查询面板 -->
+    <div class="tab-pane fade" id="yaml-pane" role="tabpanel">
+        <form action="/" method="post">
+            <input type="hidden" name="query_type" value="yaml">
+            <div class="mb-3">
+                <label for="yaml_content" class="form-label">在此粘贴 YAML 配置</label>
+                <textarea class="form-control" id="yaml_content" name="yaml_content" rows="15" placeholder="records:&#10;  - year_range: [2024, 2024]&#10;    contest_type: [NOI]&#10;    level_range: [金牌, 银牌]"></textarea>
             </div>
-            <div class="row">
-                <div class="col-md-4 mb-4">
-                    <div class="card feature-card">
-                        <div class="card-body text-center">
-                            <div class="mb-4">
-                                <i class="bi bi-file-earmark-text" style="font-size: 3rem; color: #6a11cb;"></i>
-                            </div>
-                            <h5 class="card-title">洛谷奖项格式化</h5>
-                            <p class="card-text">将洛谷奖项认证文本转换为标准YAML配置，便于后续查询和分析</p>
-                            <a href="{{ url_for('format_lgawards_route') }}" class="btn btn-primary">开始使用</a>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-4 mb-4">
-                    <div class="card feature-card">
-                        <div class="card-body text-center">
-                            <div class="mb-4">
-                                <i class="bi bi-search" style="font-size: 3rem; color: #2575fc;"></i>
-                            </div>
-                            <h5 class="card-title">高级筛选查询</h5>
-                            <p class="card-text">通过YAML配置或UI界面设置复杂筛选条件，精确查找目标选手</p>
-                            <a href="{{ url_for('find_oiers') }}" class="btn btn-primary">开始查询</a>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-4 mb-4">
-                    <div class="card feature-card">
-                        <div class="card-body text-center">
-                            <div class="mb-4">
-                                <i class="bi bi-arrow-repeat" style="font-size: 3rem; color: #28a745;"></i>
-                            </div>
-                            <h5 class="card-title">无缝集成</h5>
-                            <p class="card-text">格式化后的奖项可直接导入查询功能，实现一站式选手筛选</p>
-                            <a href="{{ url_for('format_lgawards_route') }}" class="btn btn-primary">立即体验</a>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+            <button class="btn btn-primary" type="submit">开始查询</button>
+        </form>
     </div>
 
-    <!-- How It Works Section -->
-    <div class="section bg-light">
-        <div class="container">
-            <div class="section-title">
-                <h2>使用流程</h2>
-                <p>简单三步，快速找到您需要的选手信息</p>
+    <!-- 洛谷查询面板 -->
+    <div class="tab-pane fade" id="luogu-pane" role="tabpanel">
+        <form action="/" method="post">
+            <input type="hidden" name="query_type" value="luogu">
+            <div class="mb-3">
+                <label for="luogu_content" class="form-label">在此粘贴洛谷奖项认证内容</label>
+                <textarea class="form-control" id="luogu_content" name="luogu_content" rows="15" placeholder="[2024] NOI&#10;金牌"></textarea>
             </div>
-            <div class="row">
-                <div class="col-md-4 mb-4 text-center">
-                    <div class="step-circle mb-3">
-                        <span class="step-number">1</span>
-                    </div>
-                    <h5>格式化奖项</h5>
-                    <p>将洛谷奖项认证文本粘贴到系统，自动转换为标准YAML配置</p>
-                </div>
-                <div class="col-md-4 mb-4 text-center">
-                    <div class="step-circle mb-3">
-                        <span class="step-number">2</span>
-                    </div>
-                    <h5>配置查询条件</h5>
-                    <p>使用生成的YAML配置或通过UI界面设置筛选条件</p>
-                </div>
-                <div class="col-md-4 mb-4 text-center">
-                    <div class="step-circle mb-3">
-                        <span class="step-number">3</span>
-                    </div>
-                    <h5>获取结果</h5>
-                    <p>系统返回满足条件的选手列表，包含详细比赛记录和评分</p>
-                </div>
+            <button class="btn btn-primary" type="submit">转换并查询</button>
+        </form>
+    </div>
+</div>
+
+<!-- 用于克隆的记录条件模板 -->
+<div id="record-template" class="border p-3 mb-3 rounded" style="display: none;">
+    <button type="button" class="btn-close float-end" aria-label="Close" onclick="this.parentElement.remove()"></button>
+    <div class="row g-3">
+        <div class="col-md-6">
+            <label class="form-label">比赛年份区间</label>
+            <div class="input-group">
+                <input type="number" class="form-control" name="record_year_min" placeholder="开始年份">
+                <span class="input-group-text">-</span>
+                <input type="number" class="form-control" name="record_year_max" placeholder="结束年份">
             </div>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">比赛类型 <small>(逗号分隔, 如: NOI,WC)</small></label>
+            <input type="text" class="form-control" name="record_contest_type">
+        </div>
+        <div class="col-md-12">
+            <label class="form-label">奖项等级 <small>(逗号分隔, 如: 金牌,银牌)</small></label>
+            <input type="text" class="form-control" name="record_level_range">
         </div>
     </div>
+</div>
+{% endblock %}
 
-    <!-- Footer -->
-    <footer>
-        <div class="container">
-            <p class="mb-0">© 2023 OIer 查询系统 | 基于Flask构建</p>
-        </div>
-    </footer>
-
-    <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- Bootstrap Icons -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
-    <style>
-        .step-circle {
-            width: 70px;
-            height: 70px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto;
-        }
-        .step-number {
-            color: white;
-            font-size: 2rem;
-            font-weight: bold;
-        }
-    </style>
-</body>
-</html>
+{% block scripts %}
+<script>
+document.getElementById('add-record-btn').addEventListener('click', function() {
+    const template = document.getElementById('record-template');
+    const clone = template.cloneNode(true);
+    clone.style.display = 'block';
+    clone.removeAttribute('id');
+    document.getElementById('record-conditions-container').appendChild(clone);
+});
+// 页面加载时自动添加一个记录条件
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('add-record-btn').click();
+});
+</script>
+{% endblock %}
