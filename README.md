@@ -55,5 +55,6 @@ python main.py
 最后通过从 oierdb-data/dist 中提取数据：
 
 ```
+cd ..
 python create_db.py
 ```
