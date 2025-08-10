@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, g, redirect, url_for
 import sqlite3
-import yaml
+import yaml  # 确保导入 yaml
 import json
 from urllib.parse import urlencode
 
@@ -41,18 +41,15 @@ def to_float_or_none(value):
 
 def to_list_or_none(value):
     if value is None or value == '': return None
-    # 保证返回的是列表
     items = [v.strip() for v in value.split(',') if v.strip()]
     return items if items else None
 
 
-# --- 路由 ---
+# --- 路由 (保持不变) ---
 @app.route('/', methods=['GET'])
 def index():
-    # 在 GET 请求中接收上次的查询数据
-    # 'last_query' 将是一个字典，包含了所有需要恢复的表单数据
     last_query = {
-        'query_type': request.args.get('query_type', 'ui'), # 默认激活UI标签
+        'query_type': request.args.get('query_type', 'ui'),
         'yaml_content': request.args.get('yaml_content', ''),
         'luogu_content': request.args.get('luogu_content', ''),
         'enroll_min': request.args.get('enroll_min', ''),
@@ -61,16 +58,11 @@ def index():
         'grade_max': request.args.get('grade_max', ''),
         'records': []
     }
-    
-    # 从 GET 参数中重建 records 列表
-    # Flask 的 request.args 只能获取第一个同名参数，所以我们需要一个技巧
-    # 我们将在 POST 到 /search 时将 record 数据编码为 JSON 字符串
     records_json = request.args.get('records_json', '[]')
     try:
         last_query['records'] = json.loads(records_json)
     except json.JSONDecodeError:
         last_query['records'] = []
-
     return render_template('index.html', last_query=last_query)
 
 @app.route('/search', methods=['POST'])
@@ -78,8 +70,6 @@ def search():
     query_type = request.form.get('query_type')
     config = None
     error_msg = None
-    
-    # 保存原始输入，以便返回时恢复
     form_data_for_redirect = {'query_type': query_type}
 
     try:
@@ -105,7 +95,6 @@ def search():
                 ],
                 'records': []
             }
-            # 同时保存原始表单数据用于重定向
             form_data_for_redirect.update({
                 'enroll_min': request.form.get('enroll_min', ''),
                 'enroll_max': request.form.get('enroll_max', ''),
@@ -113,7 +102,6 @@ def search():
                 'grade_max': request.form.get('grade_max', ''),
             })
             
-            # --- 核心修改部分 ---
             record_years_min = request.form.getlist('record_year_min')
             record_years_max = request.form.getlist('record_year_max')
             record_ranks_min = request.form.getlist('record_rank_min')
@@ -126,7 +114,6 @@ def search():
 
             records_for_redirect = []
             for i in range(len(record_years_min)):
-                # 为 config 构建数据
                 record_cond = {
                     'year_range': [to_int_or_none(record_years_min[i]), to_int_or_none(record_years_max[i])],
                     'rank_range': [to_int_or_none(record_ranks_min[i]), to_int_or_none(record_ranks_max[i])],
@@ -136,7 +123,6 @@ def search():
                     'level_range': to_list_or_none(record_levels[i]),
                 }
                 
-                # 为重定向构建数据 (保持原始字符串)
                 record_for_redirect = {
                     'year_min': record_years_min[i], 'year_max': record_years_max[i],
                     'rank_min': record_ranks_min[i], 'rank_max': record_ranks_max[i],
@@ -153,7 +139,6 @@ def search():
                 if is_valid_condition:
                    config['records'].append(record_cond)
             
-            # 将复杂的 record 列表编码为 JSON 字符串以便通过 GET 传递
             form_data_for_redirect['records_json'] = json.dumps(records_for_redirect)
 
     except (yaml.YAMLError, TypeError) as e:
@@ -165,12 +150,29 @@ def search():
          return render_template('results.html', error=error_msg, redirect_params=urlencode(form_data_for_redirect))
 
     if config:
+        # 在这里过滤掉值为 None 或空列表的键，以获得更干净的 YAML 输出
+        clean_config = {}
+        if config.get('enroll_year_range') and any(v is not None for v in config['enroll_year_range']):
+            clean_config['enroll_year_range'] = config['enroll_year_range']
+        if config.get('grade_range') and any(v is not None for v in config['grade_range']):
+            clean_config['grade_range'] = config['grade_range']
+        
+        clean_records = []
+        for record in config.get('records', []):
+            clean_record = {k: v for k, v in record.items() if v and (v != [None, None])}
+            if clean_record:
+                clean_records.append(clean_record)
+        if clean_records:
+            clean_config['records'] = clean_records
+            
         cursor = get_db().cursor()
         results = finder_engine.find_oiers(config, cursor)
-        config_str = json.dumps(config, indent=2, ensure_ascii=False) if config else "{}"
+        
+        # --- 核心修改：使用 yaml.dump 生成 YAML 字符串 ---
+        config_str = yaml.dump(clean_config, allow_unicode=True, sort_keys=False, default_flow_style=False) if clean_config else "无有效查询条件"
+        
         return render_template('results.html', oiers=results, config=config_str, redirect_params=urlencode(form_data_for_redirect))
     
-    # 如果没有 config，重定向回主页
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
