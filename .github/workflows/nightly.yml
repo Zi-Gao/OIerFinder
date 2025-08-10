@@ -47,6 +47,6 @@ jobs:
       - name: Push to web
         uses: ad-m/github-push-action@master
         with:
-          path: web/
+          directory: web/
           github_token: ${{ secrets.GITHUB_TOKEN }}
           branch: web
