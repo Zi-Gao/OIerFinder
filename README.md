@@ -48,7 +48,8 @@ git submodule update --init --recursive
 然后生成 [OIerDb-ng/OIerDb-data-generator](https://github.com/OIerDb-ng/OIerDb-data-generator) 的数据：
 
 ```bash
-python oierdb-data/generate_data.py
+cd oierdb-data
+python main.py
 ```
 
 最后通过从 oierdb-data/dist 中提取数据：
