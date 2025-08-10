@@ -6,39 +6,52 @@
 </div>
 
 <ul class="nav nav-tabs" id="myTab" role="tablist">
-    <li class="nav-item" role="presentation"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#ui-pane" type="button">UI 查询</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#yaml-pane" type="button">YAML 查询</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#luogu-pane" type="button">洛谷奖项查询</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link {% if last_query.query_type == 'ui' %}active{% endif %}" data-bs-toggle="tab" data-bs-target="#ui-pane" type="button">UI 查询</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link {% if last_query.query_type == 'yaml' %}active{% endif %}" data-bs-toggle="tab" data-bs-target="#yaml-pane" type="button">YAML 查询</button></li>
+    <li class="nav-item" role="presentation"><button class="nav-link {% if last_query.query_type == 'luogu' %}active{% endif %}" data-bs-toggle="tab" data-bs-target="#luogu-pane" type="button">洛谷奖项查询</button></li>
 </ul>
 
 <div class="tab-content pt-3" id="myTabContent">
     <!-- UI 查询面板 -->
-    <div class="tab-pane fade show active" id="ui-pane" role="tabpanel">
-        <form action="/" method="post">
+    <div class="tab-pane fade {% if last_query.query_type == 'ui' %}show active{% endif %}" id="ui-pane" role="tabpanel">
+        <form action="{{ url_for('search') }}" method="post">
             <input type="hidden" name="query_type" value="ui">
             <h5>选手基本信息</h5>
             <div class="row g-3 mb-3">
                 <div class="col-sm-6">
                     <label class="form-label">初中入学年份区间</label>
                     <div class="input-group">
-                        <input type="number" class="form-control" name="enroll_min" placeholder="最早年份">
+                        <input type="number" class="form-control" name="enroll_min" placeholder="最早年份" value="{{ last_query.enroll_min }}">
                         <span class="input-group-text">-</span>
-                        <input type="number" class="form-control" name="enroll_max" placeholder="最晚年份">
+                        <input type="number" class="form-control" name="enroll_max" placeholder="最晚年份" value="{{ last_query.enroll_max }}">
                     </div>
                 </div>
                 <div class="col-sm-6">
                     <label class="form-label">当前年级区间 <small>(小学1-6, 初中7-9, 高中10-12)</small></label>
                     <div class="input-group">
-                        <input type="number" class="form-control" name="grade_min" placeholder="最低年级">
+                        <input type="number" class="form-control" name="grade_min" placeholder="最低年级" value="{{ last_query.grade_min }}">
                         <span class="input-group-text">-</span>
-                        <input type="number" class="form-control" name="grade_max" placeholder="最高年级">
+                        <input type="number" class="form-control" name="grade_max" placeholder="最高年级" value="{{ last_query.grade_max }}">
                     </div>
                 </div>
             </div>
             
             <h5>比赛记录条件 <small>(选手需满足所有条件)</small></h5>
             <div id="record-conditions-container">
-                <!-- 动态记录条件将插入此处 -->
+                {# 使用循环动态生成已有的记录条件 #}
+                {% for record in last_query.records %}
+                <div class="border p-3 mb-3 rounded">
+                    <button type="button" class="btn-close float-end" aria-label="Close" onclick="this.parentElement.remove()"></button>
+                    <div class="row g-3">
+                        <div class="col-md-6"><label class="form-label">比赛年份区间</label><div class="input-group"><input type="number" class="form-control" name="record_year_min" value="{{ record.year_min }}" placeholder="开始年份"><span class="input-group-text">-</span><input type="number" class="form-control" name="record_year_max" value="{{ record.year_max }}" placeholder="结束年份"></div></div>
+                        <div class="col-md-6"><label class="form-label">排名区间</label><div class="input-group"><input type="number" class="form-control" name="record_rank_min" value="{{ record.rank_min }}" placeholder="最低排名"><span class="input-group-text">-</span><input type="number" class="form-control" name="record_rank_max" value="{{ record.rank_max }}" placeholder="最高排名"></div></div>
+                        <div class="col-md-12"><label class="form-label">分数区间</label><div class="input-group"><input type="number" step="any" class="form-control" name="record_score_min" value="{{ record.score_min }}" placeholder="最低分数"><span class="input-group-text">-</span><input type="number" step="any" class="form-control" name="record_score_max" value="{{ record.score_max }}" placeholder="最高分数"></div></div>
+                        <div class="col-md-4"><label class="form-label">省份 <small>(逗号分隔)</small></label><input type="text" class="form-control" name="record_province" value="{{ record.province }}"></div>
+                        <div class="col-md-4"><label class="form-label">比赛类型 <small>(逗号分隔)</small></label><input type="text" class="form-control" name="record_contest_type" value="{{ record.contest_type }}"></div>
+                        <div class="col-md-4"><label class="form-label">奖项等级 <small>(逗号分隔)</small></label><input type="text" class="form-control" name="record_level_range" value="{{ record.level_range }}"></div>
+                    </div>
+                </div>
+                {% endfor %}
             </div>
             <button type="button" class="btn btn-outline-success btn-sm mt-2" id="add-record-btn">添加记录条件</button>
             <hr>
@@ -47,68 +60,40 @@
     </div>
 
     <!-- YAML 查询面板 -->
-    <div class="tab-pane fade" id="yaml-pane" role="tabpanel">
-        <form action="/" method="post">
+    <div class="tab-pane fade {% if last_query.query_type == 'yaml' %}show active{% endif %}" id="yaml-pane" role="tabpanel">
+        <form action="{{ url_for('search') }}" method="post">
             <input type="hidden" name="query_type" value="yaml">
             <div class="mb-3">
                 <label for="yaml_content" class="form-label">在此粘贴 YAML 配置</label>
-                <textarea class="form-control" id="yaml_content" name="yaml_content" rows="15" placeholder="records:&#10;  - year_range: [2024, 2024]&#10;    contest_type: [NOI]&#10;    level_range: [金牌, 银牌]"></textarea>
+                <textarea class="form-control" id="yaml_content" name="yaml_content" rows="15" placeholder="records:&#10;  - year_range: [2024, 2024]&#10;    contest_type: [NOI]&#10;    level_range: [金牌, 银牌]">{{ last_query.yaml_content }}</textarea>
             </div>
             <button class="btn btn-primary" type="submit">开始查询</button>
         </form>
     </div>
 
     <!-- 洛谷查询面板 -->
-    <div class="tab-pane fade" id="luogu-pane" role="tabpanel">
-        <form action="/" method="post">
+    <div class="tab-pane fade {% if last_query.query_type == 'luogu' %}show active{% endif %}" id="luogu-pane" role="tabpanel">
+        <form action="{{ url_for('search') }}" method="post">
             <input type="hidden" name="query_type" value="luogu">
             <div class="mb-3">
                 <label for="luogu_content" class="form-label">在此粘贴洛谷奖项认证内容</label>
-                <textarea class="form-control" id="luogu_content" name="luogu_content" rows="15" placeholder="[2024] NOI&#10;金牌"></textarea>
+                <textarea class="form-control" id="luogu_content" name="luogu_content" rows="15" placeholder="[2024] NOI&#10;金牌">{{ last_query.luogu_content }}</textarea>
             </div>
             <button class="btn btn-primary" type="submit">转换并查询</button>
         </form>
     </div>
 </div>
+
+<!-- ... 记录条件模板和 script 部分保持不变 ... -->
 <div id="record-template" class="border p-3 mb-3 rounded" style="display: none;">
     <button type="button" class="btn-close float-end" aria-label="Close" onclick="this.parentElement.remove()"></button>
     <div class="row g-3">
-        <div class="col-md-6">
-            <label class="form-label">比赛年份区间</label>
-            <div class="input-group">
-                <input type="number" class="form-control" name="record_year_min" placeholder="开始年份">
-                <span class="input-group-text">-</span>
-                <input type="number" class="form-control" name="record_year_max" placeholder="结束年份">
-            </div>
-        </div>
-        <div class="col-md-6">
-            <label class="form-label">排名区间</label>
-            <div class="input-group">
-                <input type="number" class="form-control" name="record_rank_min" placeholder="最低排名">
-                <span class="input-group-text">-</span>
-                <input type="number" class="form-control" name="record_rank_max" placeholder="最高排名">
-            </div>
-        </div>
-        <div class="col-md-12">
-            <label class="form-label">分数区间</label>
-            <div class="input-group">
-                <input type="number" step="any" class="form-control" name="record_score_min" placeholder="最低分数">
-                <span class="input-group-text">-</span>
-                <input type="number" step="any" class="form-control" name="record_score_max" placeholder="最高分数">
-            </div>
-        </div>
-        <div class="col-md-4">
-            <label class="form-label">省份 <small>(逗号分隔)</small></label>
-            <input type="text" class="form-control" name="record_province">
-        </div>
-        <div class="col-md-4">
-            <label class="form-label">比赛类型 <small>(逗号分隔)</small></label>
-            <input type="text" class="form-control" name="record_contest_type">
-        </div>
-        <div class="col-md-4">
-            <label class="form-label">奖项等级 <small>(逗号分隔)</small></label>
-            <input type="text" class="form-control" name="record_level_range">
-        </div>
+        <div class="col-md-6"><label class="form-label">比赛年份区间</label><div class="input-group"><input type="number" class="form-control" name="record_year_min" placeholder="开始年份"><span class="input-group-text">-</span><input type="number" class="form-control" name="record_year_max" placeholder="结束年份"></div></div>
+        <div class="col-md-6"><label class="form-label">排名区间</label><div class="input-group"><input type="number" class="form-control" name="record_rank_min" placeholder="最低排名"><span class="input-group-text">-</span><input type="number" class="form-control" name="record_rank_max" placeholder="最高排名"></div></div>
+        <div class="col-md-12"><label class="form-label">分数区间</label><div class="input-group"><input type="number" step="any" class="form-control" name="record_score_min" placeholder="最低分数"><span class="input-group-text">-</span><input type="number" step="any" class="form-control" name="record_score_max" placeholder="最高分数"></div></div>
+        <div class="col-md-4"><label class="form-label">省份 <small>(逗号分隔)</small></label><input type="text" class="form-control" name="record_province"></div>
+        <div class="col-md-4"><label class="form-label">比赛类型 <small>(逗号分隔)</small></label><input type="text" class="form-control" name="record_contest_type"></div>
+        <div class="col-md-4"><label class="form-label">奖项等级 <small>(逗号分隔)</small></label><input type="text" class="form-control" name="record_level_range"></div>
     </div>
 </div>
 {% endblock %}
@@ -122,9 +107,13 @@ document.getElementById('add-record-btn').addEventListener('click', function() {
     clone.removeAttribute('id');
     document.getElementById('record-conditions-container').appendChild(clone);
 });
-// 页面加载时自动添加一个记录条件
+
+// 如果没有从后端恢复的记录，则自动添加一个空的
 document.addEventListener('DOMContentLoaded', function() {
-    document.getElementById('add-record-btn').click();
+    const container = document.getElementById('record-conditions-container');
+    if (container.children.length === 0) {
+        document.getElementById('add-record-btn').click();
+    }
 });
 </script>
 {% endblock %}

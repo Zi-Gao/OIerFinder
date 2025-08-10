@@ -2,7 +2,8 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1>查询结果</h1>
-    <a href="/" class="btn btn-secondary">返回查询</a>
+    {# 使用 redirect_params 构建返回链接 #}
+    <a href="{{ url_for('index') }}?{{ redirect_params|safe }}" class="btn btn-secondary">返回并编辑查询</a>
 </div>
 
 {% if error %}
