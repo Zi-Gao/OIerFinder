@@ -70,8 +70,6 @@
         </form>
     </div>
 </div>
-
-<!-- 用于克隆的记录条件模板 -->
 <div id="record-template" class="border p-3 mb-3 rounded" style="display: none;">
     <button type="button" class="btn-close float-end" aria-label="Close" onclick="this.parentElement.remove()"></button>
     <div class="row g-3">
@@ -84,11 +82,31 @@
             </div>
         </div>
         <div class="col-md-6">
-            <label class="form-label">比赛类型 <small>(逗号分隔, 如: NOI,WC)</small></label>
-            <input type="text" class="form-control" name="record_contest_type">
+            <label class="form-label">排名区间</label>
+            <div class="input-group">
+                <input type="number" class="form-control" name="record_rank_min" placeholder="最低排名">
+                <span class="input-group-text">-</span>
+                <input type="number" class="form-control" name="record_rank_max" placeholder="最高排名">
+            </div>
         </div>
         <div class="col-md-12">
-            <label class="form-label">奖项等级 <small>(逗号分隔, 如: 金牌,银牌)</small></label>
+            <label class="form-label">分数区间</label>
+            <div class="input-group">
+                <input type="number" step="any" class="form-control" name="record_score_min" placeholder="最低分数">
+                <span class="input-group-text">-</span>
+                <input type="number" step="any" class="form-control" name="record_score_max" placeholder="最高分数">
+            </div>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">省份 <small>(逗号分隔)</small></label>
+            <input type="text" class="form-control" name="record_province">
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">比赛类型 <small>(逗号分隔)</small></label>
+            <input type="text" class="form-control" name="record_contest_type">
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">奖项等级 <small>(逗号分隔)</small></label>
             <input type="text" class="form-control" name="record_level_range">
         </div>
     </div>
