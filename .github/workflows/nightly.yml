@@ -1,0 +1,52 @@
+name: Update Data
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  schedule:
+    - cron: '0 16 * * *'
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.ref }}
+          submodules: 'recursive'
+      - name: Upload
+        run: |
+          sudo apt install -y python3 nodejs
+          pip install -r requirements.txt
+          git config --global user.name zigaoBot
+          git config --global user.email "gyc.zachary@gmail.com"
+          git submodule update --remote
+          pushd oierdb-data
+          python main.py
+          popd
+          python create_db.py
+          git add .
+          git commit -m "Update db"
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref }}
+      - name: Edit web
+        run: |
+          git fetch origin web
+          git worktree add web web
+          cd web
+          cp ../name_mapping.yml ./data
+          cp ../oier_data.db ./data
+          git add .
+          git commit -m "Update db"
+      - name: Push to web
+        uses: ad-m/github-push-action@master
+        with:
+          path: web/
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: web
