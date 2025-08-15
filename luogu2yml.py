@@ -3,7 +3,7 @@ import argparse
 import os
 
 # 导入重构后的核心逻辑
-import luogu_parser
+from utils import luogu_parser
 
 DEFAULT_INPUT_FILE = 'luogu_awards.txt'
 DEFAULT_MAPPING_FILE = 'name_mapping.yml'

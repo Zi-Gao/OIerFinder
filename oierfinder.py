@@ -4,7 +4,7 @@ import argparse
 import yaml
 
 # 导入重构后的核心逻辑
-import finder_engine
+from utils import finder_engine
 
 DB_FILE = 'oier_data.db'
 DEFAULT_CONFIG_FILE = 'config.yml'

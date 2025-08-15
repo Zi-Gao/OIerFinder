@@ -5,8 +5,7 @@ import json
 from urllib.parse import urlencode
 
 # 导入我们重构的模块
-import finder_engine
-import luogu_parser
+from utils import luogu_parser,finder_engine
 
 DATABASE = 'oier_data.db'
 MAPPING_FILE = 'name_mapping.yml'
