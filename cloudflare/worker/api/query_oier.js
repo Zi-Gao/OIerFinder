@@ -1,15 +1,6 @@
 // cloudflare/worker/functions/query_oier.js
 
-// --- [新增] 业务逻辑与安全常量 ---
-
-// 定义比赛的筛选优先级。数字越小，优先级越高，越先被执行。
-// 这是基于一个常识：NOI/CTT/WC的参与者远少于CSP/NOIP。
-const CONTEST_PRIORITY = {
-    'IOI': 1, 'CTT': 1, 'NOI': 1, 'WC': 1, 'APIO': 1, // 国家队/顶级赛事
-    'NOIP': 2, 'CSP-S': 2, // 省选及NOIP/CSP-S级别
-    'CSP-J': 3, // 入门级
-};
-const DEFAULT_PRIORITY = 10; // 无特定比赛类型的过滤器优先级最低
+import CONTEST_STATS from './contest_stats.json';
 
 // 定义查询强度的评分标准
 const STRENGTH_SCORES = {
@@ -42,17 +33,54 @@ function formatUsageStep(name, meta) { return { name, rows_read: meta?.rows_read
 
 
 // --- [新增] 智能排序与安全验证的辅助函数 ---
-function getFilterPriority(filter) {
+/**
+ * 估算一个过滤器匹配的人数（选择性）。数字越小，越优先处理。
+ * @param {object} filter - 单个 record_filter 对象。
+ * @param {object} stats - 预计算的统计数据。
+ * @returns {number} 估算的匹配人数。
+ */
+function getFilterSelectivity(filter, stats) {
+    // 像 contest_id 或 school_id 这样的条件是最高优先级的，直接给一个极小值。
+    if (filter.contest_id || filter.school_id) {
+        return 1;
+    }
+
+    // 从过滤器中提取关键维度
+    const years = filter.year ? [filter.year] : (filter.year_start && filter.year_end ? Array.from({ length: filter.year_end - filter.year_start + 1 }, (_, i) => filter.year_start + i) : []);
     const types = toArray(filter.contest_type ?? filter.contest_types);
-    if (types.length === 0) return DEFAULT_PRIORITY;
-    let highestPriority = DEFAULT_PRIORITY;
-    for (const type of types) {
-        const priority = CONTEST_PRIORITY[type.toUpperCase()] ?? DEFAULT_PRIORITY;
-        if (priority < highestPriority) {
-            highestPriority = priority;
+    const provinces = toArray(filter.province ?? filter.provinces);
+    const levels = toArray(filter.level ?? filter.levels);
+
+    // 如果关键信息（年份或比赛类型）缺失，则无法估算，给予一个很差的默认分数
+    if (years.length === 0 || types.length === 0) {
+        return 100000; // 默认一个较大的数字，表示选择性差
+    }
+
+    let estimatedCount = 0;
+    
+    // 遍历所有可能的组合来累加人数
+    for (const year of years) {
+        if (!stats[year]) continue; // 如果统计数据中没有该年份，跳过
+
+        for (const type of types) {
+            if (!stats[year][type]) continue;
+
+            const relevantProvinces = provinces.length > 0 ? provinces : Object.keys(stats[year][type]);
+            for (const province of relevantProvinces) {
+                if (!stats[year][type][province]) continue;
+                
+                const relevantLevels = levels.length > 0 ? levels : Object.keys(stats[year][type][province]);
+                for (const level of relevantLevels) {
+                    // 使用可选链 (?.) 安全地访问，如果键不存在则返回 undefined
+                    estimatedCount += stats[year]?.[type]?.[province]?.[level] ?? 0;
+                }
+            }
         }
     }
-    return highestPriority;
+
+    // 如果估算出来是0，说明这是一个非常罕见的组合，优先级很高。
+    // 如果大于0，就用它的实际估算值。
+    return estimatedCount > 0 ? estimatedCount : 1;
 }
 
 function getFilterStrength(filter, isOierFilter = false) {
@@ -155,14 +183,16 @@ export default async function queryOierHandler(c) {
         const limit = normalizeLimit(payload.limit, 100);
 
         // --- 安全与优化前置处理 ---
-        const totalStrength = initialRecordFilters.reduce((sum, f) => sum + getFilterStrength(f), 0) + getFilterStrength(oierFilters, true);
-        if (initialRecordFilters.length === 0 && Object.keys(oierFilters).length === 0) {
-            return c.json({ error: "Query is too broad. Please provide at least one filter." }, 400);
-        }
-        if (totalStrength < MINIMUM_QUERY_STRENGTH) {
-            return c.json({ error: `Query is too broad and may cause high resource usage. Please add more specific conditions (e.g., year, province, school, or a more selective contest type). Your query strength score is ${totalStrength}, minimum required is ${MINIMUM_QUERY_STRENGTH}.` }, 400);
-        }
-        const recordFilters = [...initialRecordFilters].sort((a, b) => getFilterPriority(a) - getFilterPriority(b));
+        // const totalStrength = initialRecordFilters.reduce((sum, f) => sum + getFilterStrength(f), 0) + getFilterStrength(oierFilters, true);
+        // if (initialRecordFilters.length === 0 && Object.keys(oierFilters).length === 0) {
+        //     return c.json({ error: "Query is too broad. Please provide at least one filter." }, 400);
+        // }
+        // if (totalStrength < MINIMUM_QUERY_STRENGTH) {
+        //     return c.json({ error: `Query is too broad and may cause high resource usage. Please add more specific conditions (e.g., year, province, school, or a more selective contest type). Your query strength score is ${totalStrength}, minimum required is ${MINIMUM_QUERY_STRENGTH}.` }, 400);
+        // }
+        const recordFilters = [...initialRecordFilters].sort((a, b) => 
+            getFilterSelectivity(a, CONTEST_STATS) - getFilterSelectivity(b, CONTEST_STATS)
+        );
         
         // --- 核心查询逻辑 ---
         const usageSteps = [];
