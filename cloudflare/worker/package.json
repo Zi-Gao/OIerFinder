@@ -1,0 +1,41 @@
+{
+  "name": "react-postgres-fullstack-template",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "deploy": "vite build && wrangler deploy",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tailwindcss/postcss": "^4.0.14",
+    "@tailwindcss/vite": "^4.1.13",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router": "^7.4.0",
+    "react-router-dom": "^7.4.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.13.3",
+    "@eslint/js": "^9.21.0",
+    "@neondatabase/serverless": "^0.10.4",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.21.0",
+    "eslint-plugin-react": "^7.37.4",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "eslint-plugin-react-refresh": "^0.4.19",
+    "globals": "^15.15.0",
+    "hono": "^4.7.2",
+    "postcss": "^8.5.6",
+    "postgres": "^3.4.5",
+    "tailwindcss": "^4.1.13",
+    "vite": "^6.2.0",
+    "wrangler": "^4.2.0"
+  }
+}

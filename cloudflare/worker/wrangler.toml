@@ -1,0 +1,16 @@
+name = "oier-finder"
+main = "api/index.js"
+compatibility_date = "2025-09-20"
+
+[assets]
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[[rules]]
+type = "ESModule"
+globs = ["**/*.json"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "oier-data"
+database_id = "07124146-94a9-4848-9bd0-e82fc50a5af8"

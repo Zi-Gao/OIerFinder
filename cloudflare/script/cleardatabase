@@ -1,0 +1,3 @@
+wrangler d1 execute oier-data --command="DROP TABLE IF EXISTS LuoguPrizes;"
+wrangler d1 execute oier-data --command="CREATE TABLE LuoguPrizes (id INTEGER PRIMARY KEY AUTOINCREMENT, luogu_uid INTEGER NOT NULL, year INTEGER, contest TEXT NOT NULL, level TEXT NOT NULL, score REAL, rank INTEGER, event TEXT, UNIQUE(luogu_uid, year, contest, level));"
+wrangler d1 execute oier-data --command="CREATE INDEX IF NOT EXISTS idx_luogu_prizes_uid ON LuoguPrizes(luogu_uid);"
