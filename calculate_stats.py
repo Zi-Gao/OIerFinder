@@ -1,71 +1,81 @@
-# calculate_stats.py
+# generate_stats_json.py
 import sqlite3
 import json
-from pathlib import Path
+import argparse
+import os
+from collections import defaultdict
 
-def calculate_and_save_stats():
+def generate_stats_json(db_path, output_path):
     """
-    连接到oier_data.db，计算筛选条件的组合统计数据，并保存为JSON。
+    连接到 SQLite 数据库，计算统计数据，并生成一个嵌套的 JSON 对象
+    用于 Cloudflare Worker。
     """
-    db_path = Path(__file__).parent / 'oier_data.db'
-    output_path = Path(__file__).parent / 'filter_stats.json'
-    
-    if not db_path.exists():
-        print(f"❌ 错误: 数据库文件 'oier_data.db' 未在脚本目录中找到。")
+    if not os.path.exists(db_path):
+        print(f"❌ 错误: 数据库文件未找到: '{db_path}'")
         return
 
-    print(f"🔗 正在连接数据库: {db_path}...")
-    
+    print(f"🔗 正在连接到数据库: {db_path}...")
+
+    sql_query = """
+    SELECT
+        c.year,
+        c.type,
+        r.province,
+        r.level,
+        COUNT(DISTINCT r.oier_uid) as participant_count
+    FROM
+        Record r
+    JOIN
+        Contest c ON r.contest_id = c.id
+    WHERE
+        r.province IS NOT NULL AND r.province != '' AND r.level IS NOT NULL
+    GROUP BY
+        c.year, c.type, r.province, r.level;
+    """
+
+    conn = None
     try:
-        con = sqlite3.connect(db_path)
-        cur = con.cursor()
+        conn = sqlite3.connect(db_path)
+        # 使用 Row 工厂可以让我们通过列名访问数据，更清晰
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        print("🚀 正在执行统计查询...")
+        cursor.execute(sql_query)
+        results = cursor.fetchall()
+
+        if not results:
+            print("🟡 查询没有返回任何结果。")
+            return
+
+        # 构建嵌套字典结构: stats[year][type][province][level] = count
+        stats_data = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
         
-        # 这个查询是核心：按年、比赛类型、省份、奖项级别分组，
-        # 计算每个组里有多少个不同的选手。
-        sql_query = """
-        SELECT
-            c.year,
-            c.type,
-            r.province,
-            r.level,
-            COUNT(DISTINCT r.oier_uid) as oier_count
-        FROM Record r
-        JOIN Contest c ON r.contest_id = c.id
-        WHERE 
-            r.province IS NOT NULL AND r.province != '' AND
-            r.level IS NOT NULL
-        GROUP BY
-            c.year,
-            c.type,
-            r.province,
-            r.level;
-        """
+        for row in results:
+            stats_data[row['year']][row['type']][row['province']][row['level']] = row['participant_count']
+
+        print(f"✍️ 正在将统计数据写入到 JSON 文件: {output_path}...")
         
-        print("📊 正在计算统计数据，这可能需要一些时间...")
-        cur.execute(sql_query)
-        rows = cur.fetchall()
-        
-        stats = {}
-        # 我们使用 "year_type_province_level" 作为key，方便在JS中快速查找
-        for year, contest_type, province, level, count in rows:
-            key = f"{year}_{contest_type}_{province}_{level}"
-            stats[key] = count
-            
-        print(f"✅ 计算完成，共生成 {len(stats)} 条统计记录。")
-        
-        # 将统计数据写入JSON文件
-        print(f"💾 正在将数据写入: {output_path}...")
         with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(stats, f,ensure_ascii=False) # 不加indent，减小文件体积
-        
-        print("🎉 成功生成 filter_stats.json!")
+            json.dump(stats_data, f, indent=2, ensure_ascii=False)
+
+        print("\n✅ JSON 统计文件生成成功！")
+        print("💡 下一步：复制 "
+              f"'{output_path}' 文件的全部内容，然后粘贴到你的 Cloudflare Worker JS 代码中。")
 
     except sqlite3.Error as e:
         print(f"❌ 数据库错误: {e}")
     finally:
-        if 'con' in locals() and con:
-            con.close()
+        if conn:
+            conn.close()
             print("🔗 数据库连接已关闭。")
 
+def main():
+    parser = argparse.ArgumentParser(description="为 OIer 查询 Worker 生成统计数据 JSON。")
+    parser.add_argument("--db", default="oier_data.db", help="SQLite 数据库文件路径")
+    parser.add_argument("--output", default="contest_stats.json", help="输出的 JSON 文件路径")
+    args = parser.parse_args()
+    generate_stats_json(args.db, args.output)
+
 if __name__ == "__main__":
-    calculate_and_save_stats()
+    main()

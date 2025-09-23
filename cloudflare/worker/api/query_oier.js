@@ -134,16 +134,19 @@ function recordMatchesFilter(record, filter) {
 
 // --- SQL 查询构建器 ---
 function buildRecordSubquery(filter = {}, candidateUids = null) {
+    // 步骤 1: 构建 Record 和 Contest 的 WHERE 子句，与之前完全相同。
     const recordWhere = [], recordParams = [];
     const contestWhere = [], contestParams = [];
-    pushInClause(recordWhere, recordParams, 'r.level', toArray(filter.level ?? filter.levels));
-    if (filter.min_score !== undefined) { recordWhere.push('r.score >= ?'); recordParams.push(Number(filter.min_score)); }
-    if (filter.max_score !== undefined) { recordWhere.push('r.score <= ?'); recordParams.push(Number(filter.max_score)); }
-    if (filter.min_rank !== undefined) { recordWhere.push('r.rank >= ?'); recordParams.push(Number(filter.min_rank)); }
-    if (filter.max_rank !== undefined) { recordWhere.push('r.rank <= ?'); recordParams.push(Number(filter.max_rank)); }
-    pushInClause(recordWhere, recordParams, 'r.province', toArray(filter.province ?? filter.provinces));
-    pushInClause(recordWhere, recordParams, 'r.school_id', toArray(filter.school_id ?? filter.school_ids));
-    pushInClause(recordWhere, recordParams, 'r.contest_id', toArray(filter.contest_id ?? filter.contest_ids));
+    
+    pushInClause(recordWhere, recordParams, 'cr.level', toArray(filter.level ?? filter.levels)); // 注意：别名改为 cr
+    if (filter.min_score !== undefined) { recordWhere.push('cr.score >= ?'); recordParams.push(Number(filter.min_score)); }
+    if (filter.max_score !== undefined) { recordWhere.push('cr.score <= ?'); recordParams.push(Number(filter.max_score)); }
+    if (filter.min_rank !== undefined) { recordWhere.push('cr.rank >= ?'); recordParams.push(Number(filter.min_rank)); }
+    if (filter.max_rank !== undefined) { recordWhere.push('cr.rank <= ?'); recordParams.push(Number(filter.max_rank)); }
+    pushInClause(recordWhere, recordParams, 'cr.province', toArray(filter.province ?? filter.provinces));
+    pushInClause(recordWhere, recordParams, 'cr.school_id', toArray(filter.school_id ?? filter.school_ids));
+    pushInClause(recordWhere, recordParams, 'cr.contest_id', toArray(filter.contest_id ?? filter.contest_ids));
+    
     const hasContestFilter = filter.year !== undefined || filter.year_start !== undefined || filter.year_end !== undefined || filter.fall_semester !== undefined || (toArray(filter.contest_type ?? filter.contest_types)).length > 0;
     if (hasContestFilter) {
         if (filter.year !== undefined) { contestWhere.push('c.year = ?'); contestParams.push(Number(filter.year)); }
@@ -154,22 +157,66 @@ function buildRecordSubquery(filter = {}, candidateUids = null) {
         if (filter.fall_semester !== undefined) { contestWhere.push('c.fall_semester = ?'); contestParams.push(filter.fall_semester ? 1 : 0); }
         pushInClause(contestWhere, contestParams, 'c.type', toArray(filter.contest_type ?? filter.contest_types));
     }
+    
+    const filterParamCount = recordParams.length + contestParams.length;
     const needsContestJoin = contestWhere.length > 0;
-    const fromClause = needsContestJoin ? 'Record r JOIN Contest c ON r.contest_id = c.id' : 'Record r';
-    let whereClauses = [...recordWhere];
-    let params = [...recordParams];
-    if (needsContestJoin) {
-        whereClauses.push(...contestWhere);
-        params.push(...contestParams);
-    }
-    if (candidateUids) {
-        pushInClause(whereClauses, params, 'r.oier_uid', candidateUids);
-    }
-    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-    const sql = `SELECT DISTINCT r.oier_uid FROM ${fromClause} ${whereSql}`;
-    return { sql, params, filterParamCount: recordParams.length + contestParams.length };
-}
+    
+    if (candidateUids === null || candidateUids.length === 0) {
+        // --- 路径 A: 初始查询 (candidateUids 不存在) ---
+        // 逻辑保持不变，但为了统一，将 Record 表别名改为 r。
+        const fromClause = needsContestJoin ? 'Record r JOIN Contest c ON r.contest_id = c.id' : 'Record r';
+        // 重新构建 recordWhere 以使用正确的别名 'r'
+        const initialRecordWhere = [];
+        pushInClause(initialRecordWhere, [], 'r.level', toArray(filter.level ?? filter.levels));
+        if (filter.min_score !== undefined) initialRecordWhere.push('r.score >= ?');
+        if (filter.max_score !== undefined) initialRecordWhere.push('r.score <= ?');
+        if (filter.min_rank !== undefined) initialRecordWhere.push('r.rank >= ?');
+        if (filter.max_rank !== undefined) initialRecordWhere.push('r.rank <= ?');
+        pushInClause(initialRecordWhere, [], 'r.province', toArray(filter.province ?? filter.provinces));
+        pushInClause(initialRecordWhere, [], 'r.school_id', toArray(filter.school_id ?? filter.school_ids));
+        pushInClause(initialRecordWhere, [], 'r.contest_id', toArray(filter.contest_id ?? filter.contest_ids));
 
+        const whereClauses = [...initialRecordWhere, ...contestWhere];
+        const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+        const sql = `SELECT DISTINCT r.oier_uid FROM ${fromClause} ${whereSql}`;
+        const params = [...recordParams, ...contestParams]; // params are the same regardless of alias
+        return { sql, params, filterParamCount };
+        
+    } else {
+        // --- 路径 B: 后续查询 (candidateUids 存在)，使用物化 CTE 策略 ---
+        
+        // 1. 构建 CTE 部分。
+        //    我们从 Record 表中 SELECT 出所有需要的列，以避免在主查询中再次访问 Record 表。
+        const placeholders = candidateUids.map(() => '?').join(',');
+        const cteSql = `
+            WITH CandidateRecords AS (
+                SELECT *
+                FROM Record
+                WHERE oier_uid IN (${placeholders})
+                LIMIT -1
+            )
+        `;
+        
+        // 2. 构建主查询的 FROM 和 JOIN 子句。
+        //    我们从 CTE (cr) 开始，如果需要，再 JOIN Contest。
+        let fromClause = 'CandidateRecords cr';
+        if (needsContestJoin) {
+            fromClause += ' JOIN Contest c ON cr.contest_id = c.id';
+        }
+        
+        // 3. 组合 WHERE 子句。
+        const whereClauses = [...recordWhere, ...contestWhere];
+        const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+        
+        // 4. 拼接最终的 SQL。
+        const sql = `${cteSql} SELECT DISTINCT cr.oier_uid FROM ${fromClause} ${whereSql}`;
+        
+        // 5. 组合参数数组，注意顺序！CTE 的 IN 子句参数在最前面。
+        const params = [...candidateUids, ...recordParams, ...contestParams];
+        
+        return { sql, params, filterParamCount };
+    }
+}
 
 // --- 主处理器 (集成了智能排序和安全验证) ---
 export default async function queryOierHandler(c) {
