@@ -1,37 +1,30 @@
 // cloudflare/worker/functions/query_oier.js
-
 // 1. [数据导入] 从外部 JSON 文件导入预计算的统计数据。
 import CONTEST_STATS_DATA from './contest_stats.json';
-
 // --- 业务逻辑与安全常量 ---
 const { min_year, max_year, stats: CONTEST_STATS } = CONTEST_STATS_DATA;
-
 const STRENGTH_SCORES = {
-    CONTEST_ID: 10, SCHOOL_ID: 8, OIER_NAME: 10,
+    CONTEST_ID: 10, SCHOOL_ID: 8, OIER_INITIALS: 10, // [修改] OIER_NAME -> OIER_INITIALS
     YEAR: 3, PROVINCE: 2,
     HIGH_PRIORITY_CONTEST: 5,   // 国家级/国际级: NOI, CTSC, APIO, WC
     MID_PRIORITY_CONTEST: 3,    // 省选级: NOIP提高, NOIP
     LOW_PRIORITY_CONTEST: 1,    // 普及/入门级: CSP提高, CSP入门, NOIP普及
     LEVEL: 1, SCORE: 1, RANK: 1,
 };
-
 const CONTEST_PRIORITY = {
     'NOI': 1, 'CTSC': 1, 'APIO': 1, 'WC': 1, 'NOID类': 1,
     'NOIP提高': 2, 'NOIP': 2,
     'CSP提高': 3,
     'NOIP普及': 4, 'CSP入门': 4,
 };
-
 const MINIMUM_QUERY_STRENGTH = 20;
 const MAX_FILTERS_ALLOWED = 20;
-
 
 // --- 辅助函数 ---
 function toArray(value) { if (value === undefined || value === null) return []; return Array.isArray(value) ? value.filter(v => v !== undefined && v !== null) : [value]; }
 function pushInClause(targetWhere, targetParams, column, values) { if (!values || values.length === 0) return; if (values.length === 1) { targetWhere.push(`${column} = ?`); targetParams.push(values[0]); } else { const placeholders = values.map(() => '?').join(','); targetWhere.push(`${column} IN (${placeholders})`); targetParams.push(...values); } }
 function formatUsageStep(name, meta) { return { name, rows_read: meta?.rows_read ?? 0, rows_written: meta?.rows_written ?? 0, duration_ms: meta?.duration ?? 0 }; }
 function normalizeLimit(value, fallback = 100) { const num = Number(value); if (!Number.isFinite(num) || num <= 0) return fallback; return Math.min(Math.floor(num), 100); }
-
 
 // --- 过滤器处理与排序函数 ---
 function isSubset(filterA, filterB) {
@@ -55,7 +48,6 @@ function isSubset(filterA, filterB) {
            checkRange('year_start', 'year_end') &&
            checkRange('min_score', 'max_score') && checkRange('min_rank', 'max_rank');
 }
-
 function getFilterSelectivity(filter) {
     if (filter.contest_id || filter.school_id) return 1;
     const years = Array.from({ length: filter.year_end - filter.year_start + 1 }, (_, i) => filter.year_start + i);
@@ -80,11 +72,11 @@ function getFilterSelectivity(filter) {
     }
     return estimatedCount > 0 ? estimatedCount : 1;
 }
-
 function getFilterStrength(filter, isOierFilter = false) {
     let score = 0;
     if (isOierFilter) {
-        if (filter.name || filter.names) score += STRENGTH_SCORES.OIER_NAME;
+        // [修改] 移除 name，添加 initials
+        if (filter.initials) score += STRENGTH_SCORES.OIER_INITIALS;
         if (filter.enroll_min || filter.enroll_max) score += 1;
         return score;
     }
@@ -104,7 +96,6 @@ function getFilterStrength(filter, isOierFilter = false) {
     }
     return score;
 }
-
 // --- 内存过滤器 & SQL 查询构建器 ---
 function recordMatchesFilter(record, filter) {
     const levels = toArray(filter.level ?? filter.levels);
@@ -127,7 +118,6 @@ function recordMatchesFilter(record, filter) {
     if (contest_types.length > 0 && !contest_types.includes(record.type)) return false;
     return true;
 }
-
 function buildRecordSubquery(filter = {}, candidateUids = null) {
     const recordWhere = [], recordParams = [];
     const contestWhere = [], contestParams = [];
@@ -177,9 +167,7 @@ function buildRecordSubquery(filter = {}, candidateUids = null) {
     }
 }
 
-
 const D1_MAX_VARS = 100;
-
 // --- 主处理器 ---
 export default async function queryOierHandler(c) {
     if (c.req.method !== "POST") return c.json({ error: "Only POST is supported" }, 405);
@@ -193,7 +181,6 @@ export default async function queryOierHandler(c) {
         const initialRecordFilters = toArray(payload.record_filters);
         const oierFilters = payload.oier_filters ?? {};
         const limit = normalizeLimit(payload.limit);
-
         // --- 阶段 0: 安全检查与过滤器预处理 ---
         if (!isAdmin && initialRecordFilters.length > MAX_FILTERS_ALLOWED) {
             return c.json({ error: `Too many record filters. A maximum of ${MAX_FILTERS_ALLOWED} is allowed.` }, 400);
@@ -227,8 +214,6 @@ export default async function queryOierHandler(c) {
         if (processedFilters.length === 0 && Object.keys(oierFilters).length === 0) {
             return c.json({ error: "Query is too broad. Please provide at least one filter." }, 400);
         }
-
-        // [修改] 如果不是管理员，则执行查询强度检查
         if (!isAdmin && totalStrength < MINIMUM_QUERY_STRENGTH) {
             return c.json({ error: `Query is too broad. Your query strength score is ${totalStrength}, minimum required is ${MINIMUM_QUERY_STRENGTH}.` }, 400);
         }
@@ -247,32 +232,51 @@ export default async function queryOierHandler(c) {
             for (let i = 0; i < recordFilters.length; i++) {
                 const filter = recordFilters[i];
                 if (candidateUids !== null && candidateUids.length === 0) break;
+
+                // [核心修改] i === 0 时的查询逻辑
                 if (i === 0 && candidateUids === null) {
-                    let effectiveFilter = { ...filter };
+                    // 1. 构建 Record 表的筛选条件
+                    const recordWhere = [], recordParams = [];
+                    pushInClause(recordWhere, recordParams, 'r.level', toArray(filter.level ?? filter.levels));
+                    if (filter.min_score !== undefined) { recordWhere.push('r.score >= ?'); recordParams.push(Number(filter.min_score)); }
+                    if (filter.max_score !== undefined) { recordWhere.push('r.score <= ?'); recordParams.push(Number(filter.max_score)); }
+                    if (filter.min_rank !== undefined) { recordWhere.push('r.rank >= ?'); recordParams.push(Number(filter.min_rank)); }
+                    if (filter.max_rank !== undefined) { recordWhere.push('r.rank <= ?'); recordParams.push(Number(filter.max_rank)); }
+                    pushInClause(recordWhere, recordParams, 'r.province', toArray(filter.province ?? filter.provinces));
+                    pushInClause(recordWhere, recordParams, 'r.school_id', toArray(filter.school_id ?? filter.school_ids));
+                    pushInClause(recordWhere, recordParams, 'r.contest_id', toArray(filter.contest_id ?? filter.contest_ids));
+                    
+                    // 2. 构建 Contest 表的筛选条件
                     const contestWhere = [], contestParams = [];
-                    if (filter.year_start || filter.year_end || filter.fall_semester !== undefined || toArray(filter.contest_type ?? filter.contest_types).length > 0) {
-                        if (filter.year_start) { contestWhere.push('c.year >= ?'); contestParams.push(filter.year_start); }
-                        if (filter.year_end) { contestWhere.push('c.year <= ?'); contestParams.push(filter.year_end); }
-                        if (filter.fall_semester !== undefined) { contestWhere.push('c.fall_semester = ?'); contestParams.push(filter.fall_semester ? 1 : 0); }
-                        pushInClause(contestWhere, contestParams, 'c.type', toArray(filter.contest_type ?? filter.contest_types));
-                    }
-                    if (contestWhere.length > 0) {
-                        const contestSql = `SELECT id FROM Contest c WHERE ${contestWhere.join(' AND ')}`;
-                        const { results: contestResults, meta: contestMeta } = await c.env.DB.prepare(contestSql).bind(...contestParams).all();
-                        usageSteps.push(formatUsageStep("initial_contest_prefilter", contestMeta));
-                        const candidateContestIds = contestResults ? contestResults.map(row => row.id) : [];
-                        if (candidateContestIds.length === 0) { candidateUids = []; break; }
-                        const existingIds = toArray(effectiveFilter.contest_id ?? effectiveFilter.contest_ids);
-                        effectiveFilter.contest_ids = [...new Set([...existingIds, ...candidateContestIds])];
-                    }
-                    const { sql, params } = buildRecordSubquery(effectiveFilter, null);
-                    const { results: recordResults, meta: recordMeta } = await c.env.DB.prepare(sql).bind(...params).all();
-                    usageSteps.push(formatUsageStep("initial_record_query", recordMeta));
+                    if (filter.year_start) { contestWhere.push('c.year >= ?'); contestParams.push(filter.year_start); }
+                    if (filter.year_end) { contestWhere.push('c.year <= ?'); contestParams.push(filter.year_end); }
+                    if (filter.fall_semester !== undefined) { contestWhere.push('c.fall_semester = ?'); contestParams.push(filter.fall_semester ? 1 : 0); }
+                    pushInClause(contestWhere, contestParams, 'c.type', toArray(filter.contest_type ?? filter.contest_types));
+
+                    // 3. 构建 OIer 表的筛选条件
+                    const oierWhere = [], oierParams = [];
+                    pushInClause(oierWhere, oierParams, 'o.gender', toArray(oierFilters.gender ?? oierFilters.genders));
+                    if (oierFilters.enroll_min !== undefined) { oierWhere.push('o.enroll_middle >= ?'); oierParams.push(Number(oierFilters.enroll_min)); }
+                    if (oierFilters.enroll_max !== undefined) { oierWhere.push('o.enroll_middle <= ?'); oierParams.push(Number(oierFilters.enroll_max)); }
+                    pushInClause(oierWhere, oierParams, 'o.initials', toArray(oierFilters.initials));
+
+                    // 4. 组合 FROM, WHERE 和 PARAMS
+                    const fromClause = `FROM Record r JOIN OIer o ON r.oier_uid = o.uid` + (contestWhere.length > 0 ? ` JOIN Contest c ON r.contest_id = c.id` : '');
+                    const allWhereClauses = [...recordWhere, ...contestWhere, ...oierWhere];
+                    const whereSql = allWhereClauses.length > 0 ? `WHERE ${allWhereClauses.join(' AND ')}` : '';
+                    const allParams = [...recordParams, ...contestParams, ...oierParams];
+                    
+                    // 5. 执行组合查询
+                    const sql = `SELECT DISTINCT r.oier_uid ${fromClause} ${whereSql}`;
+                    const { results: recordResults, meta: recordMeta } = await c.env.DB.prepare(sql).bind(...allParams).all();
+                    usageSteps.push(formatUsageStep("initial_combined_query", recordMeta));
+
                     const uids = new Set();
                     if (recordResults) recordResults.forEach(row => uids.add(row.oier_uid));
                     candidateUids = Array.from(uids);
                     continue;
                 }
+
                 if (!verificationMode && candidateUids !== null && candidateUids.length > 0 && candidateUids.length < VERIFICATION_THRESHOLD) {
                     verificationMode = true;
                     const chunks = [];
@@ -324,10 +328,8 @@ export default async function queryOierHandler(c) {
         
         // --- 阶段 2: 最终 OIer 查询 ---
         if (candidateUids !== null) {
-            candidateUids.sort((a, b) => a - b); // 按 UID 升序排序
-            candidateUids = candidateUids.slice(0, limit); // 截取前 limit 个
-            
-            // [修改] 修改第二个提前返回的逻辑
+            candidateUids.sort((a, b) => a - b);
+            candidateUids = candidateUids.slice(0, limit);
             if (candidateUids.length === 0) {
                 const responsePayload = { data: [] };
                 if (isAdmin) {
@@ -337,27 +339,17 @@ export default async function queryOierHandler(c) {
                 return c.json(responsePayload);
             }
         }
-
-        const oierWhereClauses = [], oierBaseParams = [];
-        pushInClause(oierWhereClauses, oierBaseParams, 'o.gender', toArray(oierFilters.gender ?? oierFilters.genders));
-        if (oierFilters.enroll_min !== undefined) { oierWhereClauses.push('o.enroll_middle >= ?'); oierBaseParams.push(Number(oierFilters.enroll_min)); }
-        if (oierFilters.enroll_max !== undefined) { oierWhereClauses.push('o.enroll_middle <= ?'); oierBaseParams.push(Number(oierFilters.enroll_max)); }
-        pushInClause(oierWhereClauses, oierBaseParams, 'o.name', toArray(oierFilters.name ?? oierFilters.names));
-        if (oierFilters.min_oierdb_score !== undefined) { oierWhereClauses.push('o.oierdb_score >= ?'); oierBaseParams.push(Number(oierFilters.min_oierdb_score)); }
-        if (oierBaseParams.length >= D1_MAX_VARS) { return c.json({ error: "Oier filter is too complex..." }, 400); }
+        
         let allOiers = [];
+        // [核心修改] 如果 candidateUids 已存在, 则说明 OIer 信息已被预筛选, 直接根据 UID 查询即可。
         if (candidateUids !== null) {
-            
-            const dynamicChunkSize = D1_MAX_VARS - oierBaseParams.length;
             const chunks = [];
-            for (let i = 0; i < candidateUids.length; i += dynamicChunkSize) { chunks.push(candidateUids.slice(i, i + dynamicChunkSize)); }
+            for (let i = 0; i < candidateUids.length; i += D1_MAX_VARS) { chunks.push(candidateUids.slice(i, i + D1_MAX_VARS)); }
+            
             const promises = chunks.map((chunk) => {
-                const chunkWhere = [...oierWhereClauses];
-                const chunkParams = [...oierBaseParams];
-                pushInClause(chunkWhere, chunkParams, 'o.uid', chunk);
-                const whereClause = `WHERE ${chunkWhere.join(' AND ')}`;
-                const sql = `SELECT * FROM OIer o ${whereClause};`;
-                return c.env.DB.prepare(sql).bind(...chunkParams).all();
+                const placeholders = chunk.map(() => '?').join(',');
+                const sql = `SELECT * FROM OIer WHERE uid IN (${placeholders});`;
+                return c.env.DB.prepare(sql).bind(...chunk).all();
             });
             const resultsFromChunks = await Promise.all(promises);
             resultsFromChunks.forEach((res, chunkIndex) => {
@@ -365,20 +357,25 @@ export default async function queryOierHandler(c) {
                 if (res.results) allOiers.push(...res.results);
             });
         } else {
+            // [逻辑保留] 如果没有 record_filters (candidateUids 为 null), 则仍然使用 oierFilters 进行查询。
+            const oierWhereClauses = [], oierBaseParams = [];
+            pushInClause(oierWhereClauses, oierBaseParams, 'o.gender', toArray(oierFilters.gender ?? oierFilters.genders));
+            if (oierFilters.enroll_min !== undefined) { oierWhereClauses.push('o.enroll_middle >= ?'); oierBaseParams.push(Number(oierFilters.enroll_min)); }
+            if (oierFilters.enroll_max !== undefined) { oierWhereClauses.push('o.enroll_middle <= ?'); oierBaseParams.push(Number(oierFilters.enroll_max)); }
+            pushInClause(oierWhereClauses, oierBaseParams, 'o.initials', toArray(oierFilters.initials));
+            if (oierFilters.min_oierdb_score !== undefined) { oierWhereClauses.push('o.oierdb_score >= ?'); oierBaseParams.push(Number(oierFilters.min_oierdb_score)); }
+
             const whereClause = oierWhereClauses.length > 0 ? `WHERE ${oierWhereClauses.join(' AND ')}` : '';
-            // --- [核心改动] 2. 修改无候选人时的排序方式 ---
             const sql = `SELECT * FROM OIer o ${whereClause} ORDER BY o.uid ASC LIMIT ?;`;
             const params = [...oierBaseParams, limit];
             const { results, meta } = await c.env.DB.prepare(sql).bind(...params).all();
             allOiers = results || [];
             usageSteps.push(formatUsageStep("final_oier_query_no_uids", meta));
         }
-
-        // --- [核心改動] 3. 移除 oierdb_score 排序，确保最终输出按 UID 升序 ---
-        //    因为并行 chunk 查询可能打乱顺序，所以需要最后再排一次序。
+        
         allOiers.sort((a, b) => a.uid - b.uid);
         
-        const finalResults = allOiers; // 不再需要 slice，因为 UID 已经在前面截断
+        const finalResults = allOiers;
         const responsePayload = { data: finalResults };
         if (isAdmin) {
             const totals = usageSteps.reduce((acc, step) => { acc.rows_read += step.rows_read; acc.rows_written += step.rows_written; return acc; }, { rows_read: 0, rows_written: 0 });
@@ -388,21 +385,14 @@ export default async function queryOierHandler(c) {
                 total_rows_written: totals.rows_written,
             };
         }
-
         return c.json(responsePayload);
-
     } catch (err) {
         console.error('Error in queryOierHandler:', err);
-
-        // 默认返回通用的、不含细节的错误信息
         const errorResponse = { error: 'An internal server error occurred.' };
-
-        // 如果是管理员，则添加详细的调试信息
         if (isAdmin) {
             errorResponse.details = err.message;
-            errorResponse.stack = err.stack; // 堆栈信息对调试非常有用
+            errorResponse.stack = err.stack;
         }
-
         return c.json(errorResponse, 500);
     }
 }
