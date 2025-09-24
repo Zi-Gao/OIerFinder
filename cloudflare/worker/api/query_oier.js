@@ -1,26 +1,20 @@
 // cloudflare/worker/functions/query_oier.js
 
 // 1. [数据导入] 从外部 JSON 文件导入预计算的统计数据。
-//    这需要你的构建工具（如 Wrangler/Vite/Webpack）支持 JSON 模块的导入。
 import CONTEST_STATS_DATA from './contest_stats.json';
 
 // --- 业务逻辑与安全常量 ---
-
-// 从导入的数据中解构出统计信息和年份范围
 const { min_year, max_year, stats: CONTEST_STATS } = CONTEST_STATS_DATA;
 
-// 8. [配置更新] 根据新的赛事名称更新强度参数
 const STRENGTH_SCORES = {
     CONTEST_ID: 10, SCHOOL_ID: 8, OIER_NAME: 10,
     YEAR: 3, PROVINCE: 2,
-    // 定义不同级别比赛的强度分
     HIGH_PRIORITY_CONTEST: 5,   // 国家级/国际级: NOI, CTSC, APIO, WC
     MID_PRIORITY_CONTEST: 3,    // 省选级: NOIP提高, NOIP
     LOW_PRIORITY_CONTEST: 1,    // 普及/入门级: CSP提高, CSP入门, NOIP普及
     LEVEL: 1, SCORE: 1, RANK: 1,
 };
 
-// 比赛优先级，用于辅助强度计算
 const CONTEST_PRIORITY = {
     'NOI': 1, 'CTSC': 1, 'APIO': 1, 'WC': 1, 'NOID类': 1,
     'NOIP提高': 2, 'NOIP': 2,
@@ -28,28 +22,18 @@ const CONTEST_PRIORITY = {
     'NOIP普及': 4, 'CSP入门': 4,
 };
 
-const MINIMUM_QUERY_STRENGTH = 4; // 查询必须达到的最低总分
-const MAX_FILTERS_ALLOWED = 20; // 9. [安全] 限制最多接收的过滤器数量
+const MINIMUM_QUERY_STRENGTH = 20;
+const MAX_FILTERS_ALLOWED = 20;
 
 
 // --- 辅助函数 ---
-
 function toArray(value) { if (value === undefined || value === null) return []; return Array.isArray(value) ? value.filter(v => v !== undefined && v !== null) : [value]; }
 function pushInClause(targetWhere, targetParams, column, values) { if (!values || values.length === 0) return; if (values.length === 1) { targetWhere.push(`${column} = ?`); targetParams.push(values[0]); } else { const placeholders = values.map(() => '?').join(','); targetWhere.push(`${column} IN (${placeholders})`); targetParams.push(...values); } }
 function formatUsageStep(name, meta) { return { name, rows_read: meta?.rows_read ?? 0, rows_written: meta?.rows_written ?? 0, duration_ms: meta?.duration ?? 0 }; }
-// 5. [安全] 限制 limit 参数最大为 100
 function normalizeLimit(value, fallback = 100) { const num = Number(value); if (!Number.isFinite(num) || num <= 0) return fallback; return Math.min(Math.floor(num), 100); }
 
 
 // --- 过滤器处理与排序函数 ---
-
-/**
- * 4. [优化] 检查过滤器 A 是否是过滤器 B 的子集。
- *    用于合并冗余的过滤器。
- * @param {object} filterA - 潜在的子集过滤器
- * @param {object} filterB - 潜在的超集过滤器
- * @returns {boolean} 如果 A 是 B 的子集，则返回 true
- */
 function isSubset(filterA, filterB) {
     const check = (keyA, keyB) => {
         const valA = toArray(filterA[keyA] ?? filterA[keyB]);
@@ -58,7 +42,6 @@ function isSubset(filterA, filterB) {
         if (valB.length === 0) return false;
         return valA.every(v => valB.includes(v));
     };
-    
     const checkRange = (minKey, maxKey) => {
         const minA = filterA[minKey], maxA = filterA[maxKey];
         const minB = filterB[minKey], maxB = filterB[maxKey];
@@ -66,7 +49,6 @@ function isSubset(filterA, filterB) {
         if (maxA !== undefined && (maxB === undefined || maxA > maxB)) return false;
         return true;
     };
-
     return check('level', 'levels') && check('province', 'provinces') &&
            check('school_id', 'school_ids') && check('contest_id', 'contest_ids') &&
            check('contest_type', 'contest_types') &&
@@ -74,21 +56,13 @@ function isSubset(filterA, filterB) {
            checkRange('min_score', 'max_score') && checkRange('min_rank', 'max_rank');
 }
 
-/**
- * 估算一个过滤器匹配的人数（选择性）。数字越小，越优先处理。
- * @param {object} filter - 单个 record_filter 对象。
- * @returns {number} 估算的匹配人数。
- */
 function getFilterSelectivity(filter) {
     if (filter.contest_id || filter.school_id) return 1;
-    
     const years = Array.from({ length: filter.year_end - filter.year_start + 1 }, (_, i) => filter.year_start + i);
     const types = toArray(filter.contest_type ?? filter.contest_types);
     const provinces = toArray(filter.province ?? filter.provinces);
     const levels = toArray(filter.level ?? filter.levels);
-
     if (years.length === 0 || types.length === 0) return 100000;
-
     let estimatedCount = 0;
     for (const year of years) {
         if (!CONTEST_STATS[year]) continue;
@@ -107,12 +81,6 @@ function getFilterSelectivity(filter) {
     return estimatedCount > 0 ? estimatedCount : 1;
 }
 
-/**
- * 计算查询强度分，用于安全验证。
- * @param {object} filter - filter 对象
- * @param {boolean} isOierFilter - 是否为 oier_filter
- * @returns {number} 强度分
- */
 function getFilterStrength(filter, isOierFilter = false) {
     let score = 0;
     if (isOierFilter) {
@@ -163,7 +131,6 @@ function recordMatchesFilter(record, filter) {
 function buildRecordSubquery(filter = {}, candidateUids = null) {
     const recordWhere = [], recordParams = [];
     const contestWhere = [], contestParams = [];
-    
     pushInClause(recordWhere, recordParams, 'cr.level', toArray(filter.level ?? filter.levels));
     if (filter.min_score !== undefined) { recordWhere.push('cr.score >= ?'); recordParams.push(Number(filter.min_score)); }
     if (filter.max_score !== undefined) { recordWhere.push('cr.score <= ?'); recordParams.push(Number(filter.max_score)); }
@@ -172,26 +139,18 @@ function buildRecordSubquery(filter = {}, candidateUids = null) {
     pushInClause(recordWhere, recordParams, 'cr.province', toArray(filter.province ?? filter.provinces));
     pushInClause(recordWhere, recordParams, 'cr.school_id', toArray(filter.school_id ?? filter.school_ids));
     pushInClause(recordWhere, recordParams, 'cr.contest_id', toArray(filter.contest_id ?? filter.contest_ids));
-    
-    const hasContestFilter = filter.year !== undefined || filter.year_start !== undefined || filter.year_end !== undefined || filter.fall_semester !== undefined || (toArray(filter.contest_type ?? filter.contest_types)).length > 0;
+    const hasContestFilter = filter.year_start || filter.year_end || filter.fall_semester !== undefined || toArray(filter.contest_type ?? filter.contest_types).length > 0;
     if (hasContestFilter) {
-        if (filter.year !== undefined) { contestWhere.push('c.year = ?'); contestParams.push(Number(filter.year)); }
-        else {
-            if (filter.year_start !== undefined) { contestWhere.push('c.year >= ?'); contestParams.push(Number(filter.year_start)); }
-            if (filter.year_end !== undefined) { contestWhere.push('c.year <= ?'); contestParams.push(Number(filter.year_end)); }
-        }
+        if (filter.year_start) { contestWhere.push('c.year >= ?'); contestParams.push(filter.year_start); }
+        if (filter.year_end) { contestWhere.push('c.year <= ?'); contestParams.push(filter.year_end); }
         if (filter.fall_semester !== undefined) { contestWhere.push('c.fall_semester = ?'); contestParams.push(filter.fall_semester ? 1 : 0); }
         pushInClause(contestWhere, contestParams, 'c.type', toArray(filter.contest_type ?? filter.contest_types));
     }
-    
     const filterParamCount = recordParams.length + contestParams.length;
     const needsContestJoin = contestWhere.length > 0;
-    
     if (candidateUids === null || candidateUids.length === 0) {
         const fromClause = needsContestJoin ? 'Record r JOIN Contest c ON r.contest_id = c.id' : 'Record r';
-        
-        const initialRecordWhereClauses = [];
-        const initialRecordParams = [];
+        const initialRecordWhereClauses = [], initialRecordParams = [];
         pushInClause(initialRecordWhereClauses, initialRecordParams, 'r.level', toArray(filter.level ?? filter.levels));
         if (filter.min_score !== undefined) { initialRecordWhereClauses.push('r.score >= ?'); initialRecordParams.push(Number(filter.min_score)); }
         if (filter.max_score !== undefined) { initialRecordWhereClauses.push('r.score <= ?'); initialRecordParams.push(Number(filter.max_score)); }
@@ -200,7 +159,6 @@ function buildRecordSubquery(filter = {}, candidateUids = null) {
         pushInClause(initialRecordWhereClauses, initialRecordParams, 'r.province', toArray(filter.province ?? filter.provinces));
         pushInClause(initialRecordWhereClauses, initialRecordParams, 'r.school_id', toArray(filter.school_id ?? filter.school_ids));
         pushInClause(initialRecordWhereClauses, initialRecordParams, 'r.contest_id', toArray(filter.contest_id ?? filter.contest_ids));
-        
         const whereClauses = [...initialRecordWhereClauses, ...contestWhere];
         const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
         const sql = `SELECT DISTINCT r.oier_uid FROM ${fromClause} ${whereSql}`;
@@ -210,9 +168,7 @@ function buildRecordSubquery(filter = {}, candidateUids = null) {
         const placeholders = candidateUids.map(() => '?').join(',');
         const cteSql = `WITH CandidateRecords AS (SELECT * FROM Record WHERE oier_uid IN (${placeholders}) LIMIT -1)`;
         let fromClause = 'CandidateRecords cr';
-        if (needsContestJoin) {
-            fromClause += ' JOIN Contest c ON cr.contest_id = c.id';
-        }
+        if (needsContestJoin) fromClause += ' JOIN Contest c ON cr.contest_id = c.id';
         const whereClauses = [...recordWhere, ...contestWhere];
         const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
         const sql = `${cteSql} SELECT DISTINCT cr.oier_uid FROM ${fromClause} ${whereSql}`;
@@ -220,6 +176,7 @@ function buildRecordSubquery(filter = {}, candidateUids = null) {
         return { sql, params, filterParamCount };
     }
 }
+
 
 const D1_MAX_VARS = 100;
 
@@ -238,7 +195,6 @@ export default async function queryOierHandler(c) {
         if (initialRecordFilters.length > MAX_FILTERS_ALLOWED) {
             return c.json({ error: `Too many record filters. A maximum of ${MAX_FILTERS_ALLOWED} is allowed.` }, 400);
         }
-
         let processedFilters = initialRecordFilters.map(f => {
             let filter = { ...f };
             if (filter.year) {
@@ -253,28 +209,17 @@ export default async function queryOierHandler(c) {
             const hasOtherConditions = Object.keys(f).some(k => !['year', 'year_start', 'year_end'].includes(k));
             return !(isTooBroad && !hasOtherConditions);
         });
-
         processedFilters = processedFilters.reduce((acc, current) => {
             let shouldAdd = true;
             const nextAcc = [];
             for (const existing of acc) {
-                if (isSubset(current, existing)) { 
-                    // current is stricter, so it should replace existing.
-                    // We simply don't add `existing` to the next accumulator.
-                } else if (isSubset(existing, current)) { 
-                    // existing is stricter, so we discard `current`.
-                    shouldAdd = false;
-                    nextAcc.push(existing);
-                } else {
-                    nextAcc.push(existing);
-                }
+                if (isSubset(current, existing)) {} 
+                else if (isSubset(existing, current)) { shouldAdd = false; nextAcc.push(existing); } 
+                else { nextAcc.push(existing); }
             }
-            if (shouldAdd) {
-                nextAcc.push(current);
-            }
+            if (shouldAdd) nextAcc.push(current);
             return nextAcc;
         }, []);
-
         const totalStrength = processedFilters.reduce((sum, f) => sum + getFilterStrength(f), 0) + getFilterStrength(oierFilters, true);
         if (processedFilters.length === 0 && Object.keys(oierFilters).length === 0) {
             return c.json({ error: "Query is too broad. Please provide at least one filter." }, 400);
@@ -282,31 +227,27 @@ export default async function queryOierHandler(c) {
         if (totalStrength < MINIMUM_QUERY_STRENGTH) {
             return c.json({ error: `Query is too broad. Your query strength score is ${totalStrength}, minimum required is ${MINIMUM_QUERY_STRENGTH}.` }, 400);
         }
-
         const recordFilters = processedFilters.sort((a, b) => getFilterSelectivity(a) - getFilterSelectivity(b));
         
         // --- 阶段 1: 核心查询逻辑 ---
         const usageSteps = [];
         let candidateUids = null; 
-        
         if (recordFilters.length > 0 && getFilterSelectivity(recordFilters[0]) < 1) {
             candidateUids = [];
         } else {
             
-            const VERIFICATION_THRESHOLD = 100;
+            const VERIFICATION_THRESHOLD = 50;
             let verificationMode = false;
             const oierRecordsMap = new Map();
-
             for (let i = 0; i < recordFilters.length; i++) {
                 const filter = recordFilters[i];
                 if (candidateUids !== null && candidateUids.length === 0) break;
-
                 if (i === 0 && candidateUids === null) {
                     let effectiveFilter = { ...filter };
                     const contestWhere = [], contestParams = [];
                     if (filter.year_start || filter.year_end || filter.fall_semester !== undefined || toArray(filter.contest_type ?? filter.contest_types).length > 0) {
-                        if (filter.year_start) contestWhere.push('c.year >= ?'); contestParams.push(filter.year_start);
-                        if (filter.year_end) contestWhere.push('c.year <= ?'); contestParams.push(filter.year_end);
+                        if (filter.year_start) { contestWhere.push('c.year >= ?'); contestParams.push(filter.year_start); }
+                        if (filter.year_end) { contestWhere.push('c.year <= ?'); contestParams.push(filter.year_end); }
                         if (filter.fall_semester !== undefined) { contestWhere.push('c.fall_semester = ?'); contestParams.push(filter.fall_semester ? 1 : 0); }
                         pushInClause(contestWhere, contestParams, 'c.type', toArray(filter.contest_type ?? filter.contest_types));
                     }
@@ -327,7 +268,6 @@ export default async function queryOierHandler(c) {
                     candidateUids = Array.from(uids);
                     continue;
                 }
-
                 if (!verificationMode && candidateUids !== null && candidateUids.length > 0 && candidateUids.length < VERIFICATION_THRESHOLD) {
                     verificationMode = true;
                     const chunks = [];
@@ -361,9 +301,7 @@ export default async function queryOierHandler(c) {
                     if (filterParamCount >= D1_MAX_VARS) { return c.json({ error: `Filter at index ${i} is too complex...` }, 400); }
                     const dynamicChunkSize = D1_MAX_VARS - filterParamCount;
                     const chunks = candidateUids ? [] : [null];
-                    if (candidateUids) {
-                       for (let j = 0; j < candidateUids.length; j += dynamicChunkSize) { chunks.push(candidateUids.slice(j, j + dynamicChunkSize)); }
-                    }
+                    if (candidateUids) { for (let j = 0; j < candidateUids.length; j += dynamicChunkSize) { chunks.push(candidateUids.slice(j, j + dynamicChunkSize)); } }
                     const promises = chunks.map(chunk => {
                         const { sql, params } = buildRecordSubquery(filter, chunk);
                         return c.env.DB.prepare(sql).bind(...params).all();
@@ -384,6 +322,18 @@ export default async function queryOierHandler(c) {
             const totals = usageSteps.reduce((acc, step) => { acc.rows_read += step.rows_read; acc.rows_written += step.rows_written; return acc; }, { rows_read: 0, rows_written: 0 });
             return c.json({ data: [], usage: { steps: usageSteps, total_rows_read: totals.rows_read, total_rows_written: totals.rows_written }});
         }
+        
+        // --- [核心改动] 1. 在查询 OIer 详细信息前，对 UID 进行排序和截断 ---
+        if (candidateUids !== null) {
+            candidateUids.sort((a, b) => a - b); // 按 UID 升序排序
+            candidateUids = candidateUids.slice(0, limit); // 截取前 limit 个
+            if (candidateUids.length === 0) {
+                // 如果截断后为空（例如 limit 为 0），直接返回
+                const totals = usageSteps.reduce((acc, step) => { acc.rows_read += step.rows_read; acc.rows_written += step.rows_written; return acc; }, { rows_read: 0, rows_written: 0 });
+                return c.json({ data: [], usage: { steps: usageSteps, total_rows_read: totals.rows_read, total_rows_written: totals.rows_written }});
+            }
+        }
+
         const oierWhereClauses = [], oierBaseParams = [];
         pushInClause(oierWhereClauses, oierBaseParams, 'o.gender', toArray(oierFilters.gender ?? oierFilters.genders));
         if (oierFilters.enroll_min !== undefined) { oierWhereClauses.push('o.enroll_middle >= ?'); oierBaseParams.push(Number(oierFilters.enroll_min)); }
@@ -412,19 +362,19 @@ export default async function queryOierHandler(c) {
             });
         } else {
             const whereClause = oierWhereClauses.length > 0 ? `WHERE ${oierWhereClauses.join(' AND ')}` : '';
-            const sql = `SELECT * FROM OIer o ${whereClause} ORDER BY o.oierdb_score DESC, o.uid ASC LIMIT ?;`;
+            // --- [核心改动] 2. 修改无候选人时的排序方式 ---
+            const sql = `SELECT * FROM OIer o ${whereClause} ORDER BY o.uid ASC LIMIT ?;`;
             const params = [...oierBaseParams, limit];
             const { results, meta } = await c.env.DB.prepare(sql).bind(...params).all();
             allOiers = results || [];
             usageSteps.push(formatUsageStep("final_oier_query_no_uids", meta));
         }
-        if (candidateUids !== null) {
-            allOiers.sort((a, b) => {
-                if (b.oierdb_score !== a.oierdb_score) { return b.oierdb_score - a.oierdb_score; }
-                return a.uid - b.uid;
-            });
-        }
-        const finalResults = allOiers.slice(0, limit);
+
+        // --- [核心改動] 3. 移除 oierdb_score 排序，确保最终输出按 UID 升序 ---
+        //    因为并行 chunk 查询可能打乱顺序，所以需要最后再排一次序。
+        allOiers.sort((a, b) => a.uid - b.uid);
+        
+        const finalResults = allOiers; // 不再需要 slice，因为 UID 已经在前面截断
         const totals = usageSteps.reduce((acc, step) => { acc.rows_read += step.rows_read; acc.rows_written += step.rows_written; return acc; }, { rows_read: 0, rows_written: 0 });
         return c.json({
             data: finalResults,
