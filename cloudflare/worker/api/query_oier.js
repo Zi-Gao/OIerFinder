@@ -185,14 +185,17 @@ export default async function queryOierHandler(c) {
     if (c.req.method !== "POST") return c.json({ error: "Only POST is supported" }, 405);
     let payload;
     try { payload = await c.req.json(); } catch (err) { return c.json({ error: "Invalid JSON" }, 400); }
-
+    const ADMIN_SECRET = c.env.ADMIN_SECRET;
+    const clientSecret = c.req.header('X-Admin-Secret');
+    const isAdmin = ADMIN_SECRET && clientSecret === ADMIN_SECRET;
+    
     try {
         const initialRecordFilters = toArray(payload.record_filters);
         const oierFilters = payload.oier_filters ?? {};
         const limit = normalizeLimit(payload.limit);
 
         // --- 阶段 0: 安全检查与过滤器预处理 ---
-        if (initialRecordFilters.length > MAX_FILTERS_ALLOWED) {
+        if (!isAdmin && initialRecordFilters.length > MAX_FILTERS_ALLOWED) {
             return c.json({ error: `Too many record filters. A maximum of ${MAX_FILTERS_ALLOWED} is allowed.` }, 400);
         }
         let processedFilters = initialRecordFilters.map(f => {
@@ -224,7 +227,9 @@ export default async function queryOierHandler(c) {
         if (processedFilters.length === 0 && Object.keys(oierFilters).length === 0) {
             return c.json({ error: "Query is too broad. Please provide at least one filter." }, 400);
         }
-        if (totalStrength < MINIMUM_QUERY_STRENGTH) {
+
+        // [修改] 如果不是管理员，则执行查询强度检查
+        if (!isAdmin && totalStrength < MINIMUM_QUERY_STRENGTH) {
             return c.json({ error: `Query is too broad. Your query strength score is ${totalStrength}, minimum required is ${MINIMUM_QUERY_STRENGTH}.` }, 400);
         }
         const recordFilters = processedFilters.sort((a, b) => getFilterSelectivity(a) - getFilterSelectivity(b));
@@ -318,19 +323,18 @@ export default async function queryOierHandler(c) {
         }
         
         // --- 阶段 2: 最终 OIer 查询 ---
-        if (candidateUids !== null && candidateUids.length === 0) {
-            const totals = usageSteps.reduce((acc, step) => { acc.rows_read += step.rows_read; acc.rows_written += step.rows_written; return acc; }, { rows_read: 0, rows_written: 0 });
-            return c.json({ data: [], usage: { steps: usageSteps, total_rows_read: totals.rows_read, total_rows_written: totals.rows_written }});
-        }
-        
-        // --- [核心改动] 1. 在查询 OIer 详细信息前，对 UID 进行排序和截断 ---
         if (candidateUids !== null) {
             candidateUids.sort((a, b) => a - b); // 按 UID 升序排序
             candidateUids = candidateUids.slice(0, limit); // 截取前 limit 个
+            
+            // [修改] 修改第二个提前返回的逻辑
             if (candidateUids.length === 0) {
-                // 如果截断后为空（例如 limit 为 0），直接返回
-                const totals = usageSteps.reduce((acc, step) => { acc.rows_read += step.rows_read; acc.rows_written += step.rows_written; return acc; }, { rows_read: 0, rows_written: 0 });
-                return c.json({ data: [], usage: { steps: usageSteps, total_rows_read: totals.rows_read, total_rows_written: totals.rows_written }});
+                const responsePayload = { data: [] };
+                if (isAdmin) {
+                    const totals = usageSteps.reduce((acc, step) => { acc.rows_read += step.rows_read; acc.rows_written += step.rows_written; return acc; }, { rows_read: 0, rows_written: 0 });
+                    responsePayload.usage = { steps: usageSteps, total_rows_read: totals.rows_read, total_rows_written: totals.rows_written };
+                }
+                return c.json(responsePayload);
             }
         }
 
@@ -375,14 +379,30 @@ export default async function queryOierHandler(c) {
         allOiers.sort((a, b) => a.uid - b.uid);
         
         const finalResults = allOiers; // 不再需要 slice，因为 UID 已经在前面截断
-        const totals = usageSteps.reduce((acc, step) => { acc.rows_read += step.rows_read; acc.rows_written += step.rows_written; return acc; }, { rows_read: 0, rows_written: 0 });
-        return c.json({
-            data: finalResults,
-            usage: { steps: usageSteps, total_rows_read: totals.rows_read, total_rows_written: totals.rows_written },
-        });
+        const responsePayload = { data: finalResults };
+        if (isAdmin) {
+            const totals = usageSteps.reduce((acc, step) => { acc.rows_read += step.rows_read; acc.rows_written += step.rows_written; return acc; }, { rows_read: 0, rows_written: 0 });
+            responsePayload.usage = {
+                steps: usageSteps,
+                total_rows_read: totals.rows_read,
+                total_rows_written: totals.rows_written,
+            };
+        }
+
+        return c.json(responsePayload);
 
     } catch (err) {
         console.error('Error in queryOierHandler:', err);
-        return c.json({ error: 'An internal server error occurred.', details: err.message }, 500);
+
+        // 默认返回通用的、不含细节的错误信息
+        const errorResponse = { error: 'An internal server error occurred.' };
+
+        // 如果是管理员，则添加详细的调试信息
+        if (isAdmin) {
+            errorResponse.details = err.message;
+            errorResponse.stack = err.stack; // 堆栈信息对调试非常有用
+        }
+
+        return c.json(errorResponse, 500);
     }
 }

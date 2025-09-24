@@ -181,11 +181,14 @@ function generateQueryPayload(prizes) {
         if (prize.rank !== null) { filter.min_rank = prize.rank; filter.max_rank = prize.rank; }
         return filter;
     }).filter(Boolean);
-    return { record_filters: recordFilters, oier_filters: {}, limit: 10 };
+    return { record_filters: recordFilters, oier_filters: {} };
 }
 
 export default async function luoguToQueryHandler(c) {
     // c.executionCtx: 相当于之前的 ctx
+    const ADMIN_SECRET = c.env.ADMIN_SECRET;
+    const clientSecret = c.req.header('X-Admin-Secret');
+    const isAdmin = ADMIN_SECRET && clientSecret === ADMIN_SECRET;
     try {
         const uid = c.req.query("uid");
         const sync = c.req.query("sync") === 'true' || c.req.query("sync") === '1';
@@ -200,7 +203,17 @@ export default async function luoguToQueryHandler(c) {
         return c.json(queryPayload);
 
     } catch (err) {
-        console.error('Error in luoguToQueryHandler:', err);
-        return c.json({ error: `An internal error occurred: ${err.message}` }, 500);
+        console.error('Error in queryOierHandler:', err);
+
+        // 默认返回通用的、不含细节的错误信息
+        const errorResponse = { error: 'An internal server error occurred.' };
+
+        // 如果是管理员，则添加详细的调试信息
+        if (isAdmin) {
+            errorResponse.details = err.message;
+            errorResponse.stack = err.stack; // 堆栈信息对调试非常有用
+        }
+
+        return c.json(errorResponse, 500);
     }
 }

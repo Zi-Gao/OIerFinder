@@ -1,9 +1,10 @@
-// src/components/LuoguQuery.jsx
+// src/components/LuoguQuery.jsx (修改)
 import React, { useState } from 'react';
 import { getLuoguPrizes, getQueryFromJson, searchOiers } from '../api/client';
 import ResultsDisplay from './ResultsDisplay';
 
-function LuoguQuery() {
+// 接收 adminSecret 和 limit
+function LuoguQuery({ adminSecret, limit }) {
   const [uid, setUid] = useState('');
   const [prizes, setPrizes] = useState(null);
   const [results, setResults] = useState(null);
@@ -19,7 +20,7 @@ function LuoguQuery() {
     setError('');
     setPrizes(null);
     try {
-      const data = await getLuoguPrizes(uid);
+      const data = await getLuoguPrizes(uid, adminSecret);
       setPrizes(data);
     } catch (err) {
       setError(err.message);
@@ -33,8 +34,12 @@ function LuoguQuery() {
     setError('');
     setResults(null);
     try {
-      const queryPayload = await getQueryFromJson(uid);
-      const data = await searchOiers(queryPayload);
+      const queryPayload = await getQueryFromJson(uid, adminSecret);
+      
+      // *** 关键修改：将全局 limit 添加到查询体中 ***
+      queryPayload.limit = limit;
+
+      const data = await searchOiers(queryPayload, adminSecret);
       setResults(data);
     } catch (err) {
       setError(err.message);
@@ -61,28 +66,27 @@ function LuoguQuery() {
           </button>
         </div>
       </div>
-      
       {prizes && (
         <div className="bg-gray-700 p-4 rounded-lg">
           <h3 className="text-lg font-semibold mb-2">Awards Found ({prizes.length})</h3>
           <div className="max-h-60 overflow-y-auto text-sm border border-gray-600 rounded-md">
             <table className="w-full text-left">
-                <thead className="sticky top-0 bg-gray-800">
-                    <tr>
-                        <th className="p-2">Year</th>
-                        <th className="p-2">Contest</th>
-                        <th className="p-2">Prize</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {prizes.map((p, i) => (
-                        <tr key={i} className="border-t border-gray-600">
-                            <td className="p-2">{p.year || 'N/A'}</td>
-                            <td className="p-2">{p.contest_name}</td>
-                            <td className="p-2">{p.prize_level}</td>
-                        </tr>
-                    ))}
-                </tbody>
+              <thead className="sticky top-0 bg-gray-800">
+                <tr>
+                  <th className="p-2">Year</th>
+                  <th className="p-2">Contest</th>
+                  <th className="p-2">Prize</th>
+                </tr>
+              </thead>
+              <tbody>
+                {prizes.map((p, i) => (
+                  <tr key={i} className="border-t border-gray-600">
+                    <td className="p-2">{p.year || 'N/A'}</td>
+                    <td className="p-2">{p.contest_name}</td>
+                    <td className="p-2">{p.prize_level}</td>
+                  </tr>
+                ))}
+              </tbody>
             </table>
           </div>
           <button onClick={handleSearch} disabled={loading.search} className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-500">
@@ -90,7 +94,6 @@ function LuoguQuery() {
           </button>
         </div>
       )}
-
       <ResultsDisplay results={results} error={error} loading={loading.search || loading.prizes} />
     </div>
   );

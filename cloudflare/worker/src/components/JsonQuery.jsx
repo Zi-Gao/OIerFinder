@@ -3,9 +3,10 @@ import React, { useState } from 'react';
 import ResultsDisplay from './ResultsDisplay';
 import { searchOiers } from '../api/client';
 
-const defaultQuery = { record_filters: [{ contest_type: "NOI", level: "金牌" }], limit: 10 };
+// Default query no longer needs a limit, it will be added from global settings
+const defaultQuery = { record_filters: [{ contest_type: "NOI", level: "金牌" }] };
 
-function JsonQuery() {
+function JsonQuery({ adminSecret, limit }) { // Accept global props
   const [query, setQuery] = useState(JSON.stringify(defaultQuery, null, 2));
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -18,7 +19,13 @@ function JsonQuery() {
     setResults(null);
     try {
       const parsedQuery = JSON.parse(query);
-      const data = await searchOiers(parsedQuery);
+      
+      // Add the global limit if it's not already defined in the user's JSON
+      if (!('limit' in parsedQuery)) {
+        parsedQuery.limit = limit;
+      }
+
+      const data = await searchOiers(parsedQuery, adminSecret); // Pass adminSecret
       setResults(data);
     } catch (err) {
       setError(err.message);
@@ -44,4 +51,5 @@ function JsonQuery() {
     </div>
   );
 }
+
 export default JsonQuery;

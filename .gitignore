@@ -6,3 +6,4 @@ config.yml
 .DS_Store
 node_modules/
 .wrangler
+.env
