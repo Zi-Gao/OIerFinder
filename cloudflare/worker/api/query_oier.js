@@ -4,7 +4,7 @@ import CONTEST_STATS_DATA from './contest_stats.json';
 // --- 业务逻辑与安全常量 ---
 const { min_year, max_year, stats: CONTEST_STATS } = CONTEST_STATS_DATA;
 const STRENGTH_SCORES = {
-    CONTEST_ID: 10, SCHOOL_ID: 8, OIER_INITIALS: 10, // [修改] OIER_NAME -> OIER_INITIALS
+    CONTEST_ID: 10, SCHOOL_ID: 8, OIER_INITIALS: 10, // [修改] name -> initials
     YEAR: 3, PROVINCE: 2,
     HIGH_PRIORITY_CONTEST: 5,   // 国家级/国际级: NOI, CTSC, APIO, WC
     MID_PRIORITY_CONTEST: 3,    // 省选级: NOIP提高, NOIP
@@ -19,13 +19,11 @@ const CONTEST_PRIORITY = {
 };
 const MINIMUM_QUERY_STRENGTH = 20;
 const MAX_FILTERS_ALLOWED = 20;
-
 // --- 辅助函数 ---
 function toArray(value) { if (value === undefined || value === null) return []; return Array.isArray(value) ? value.filter(v => v !== undefined && v !== null) : [value]; }
 function pushInClause(targetWhere, targetParams, column, values) { if (!values || values.length === 0) return; if (values.length === 1) { targetWhere.push(`${column} = ?`); targetParams.push(values[0]); } else { const placeholders = values.map(() => '?').join(','); targetWhere.push(`${column} IN (${placeholders})`); targetParams.push(...values); } }
 function formatUsageStep(name, meta) { return { name, rows_read: meta?.rows_read ?? 0, rows_written: meta?.rows_written ?? 0, duration_ms: meta?.duration ?? 0 }; }
 function normalizeLimit(value, fallback = 100) { const num = Number(value); if (!Number.isFinite(num) || num <= 0) return fallback; return Math.min(Math.floor(num), 100); }
-
 // --- 过滤器处理与排序函数 ---
 function isSubset(filterA, filterB) {
     const check = (keyA, keyB) => {
@@ -75,7 +73,7 @@ function getFilterSelectivity(filter) {
 function getFilterStrength(filter, isOierFilter = false) {
     let score = 0;
     if (isOierFilter) {
-        // [修改] 移除 name，添加 initials
+        // [修改] 替换 name 为 initials
         if (filter.initials) score += STRENGTH_SCORES.OIER_INITIALS;
         if (filter.enroll_min || filter.enroll_max) score += 1;
         return score;
@@ -118,9 +116,12 @@ function recordMatchesFilter(record, filter) {
     if (contest_types.length > 0 && !contest_types.includes(record.type)) return false;
     return true;
 }
-function buildRecordSubquery(filter = {}, candidateUids = null) {
+// [修改] 添加 oierFilter 参数以支持在初始查询时 JOIN OIer 表
+function buildRecordSubquery(filter = {}, candidateUids = null, oierFilter = {}) {
     const recordWhere = [], recordParams = [];
     const contestWhere = [], contestParams = [];
+    
+    // 这部分逻辑用于后续筛选，保持不变
     pushInClause(recordWhere, recordParams, 'cr.level', toArray(filter.level ?? filter.levels));
     if (filter.min_score !== undefined) { recordWhere.push('cr.score >= ?'); recordParams.push(Number(filter.min_score)); }
     if (filter.max_score !== undefined) { recordWhere.push('cr.score <= ?'); recordParams.push(Number(filter.max_score)); }
@@ -129,6 +130,7 @@ function buildRecordSubquery(filter = {}, candidateUids = null) {
     pushInClause(recordWhere, recordParams, 'cr.province', toArray(filter.province ?? filter.provinces));
     pushInClause(recordWhere, recordParams, 'cr.school_id', toArray(filter.school_id ?? filter.school_ids));
     pushInClause(recordWhere, recordParams, 'cr.contest_id', toArray(filter.contest_id ?? filter.contest_ids));
+    
     const hasContestFilter = filter.year_start || filter.year_end || filter.fall_semester !== undefined || toArray(filter.contest_type ?? filter.contest_types).length > 0;
     if (hasContestFilter) {
         if (filter.year_start) { contestWhere.push('c.year >= ?'); contestParams.push(filter.year_start); }
@@ -136,11 +138,35 @@ function buildRecordSubquery(filter = {}, candidateUids = null) {
         if (filter.fall_semester !== undefined) { contestWhere.push('c.fall_semester = ?'); contestParams.push(filter.fall_semester ? 1 : 0); }
         pushInClause(contestWhere, contestParams, 'c.type', toArray(filter.contest_type ?? filter.contest_types));
     }
+    
     const filterParamCount = recordParams.length + contestParams.length;
     const needsContestJoin = contestWhere.length > 0;
-    if (candidateUids === null || candidateUids.length === 0) {
-        const fromClause = needsContestJoin ? 'Record r JOIN Contest c ON r.contest_id = c.id' : 'Record r';
+    
+    if (candidateUids === null) { // 首次查询
+        let fromClause = 'Record r';
+        const oierWhere = [], oierParams = [];
+
+        // [新增] 如果提供了 oierFilter，则准备 JOIN OIer 表
+        const hasOierFilter = oierFilter && Object.keys(oierFilter).length > 0;
+        const needsOierJoin = hasOierFilter && (
+            toArray(oierFilter.gender ?? oierFilter.genders).length > 0 ||
+            oierFilter.enroll_min !== undefined ||
+            oierFilter.enroll_max !== undefined ||
+            toArray(oierFilter.initials).length > 0
+        );
+
+        if (needsOierJoin) {
+            fromClause += ' JOIN OIer o ON r.oier_uid = o.uid';
+            pushInClause(oierWhere, oierParams, 'o.gender', toArray(oierFilter.gender ?? oierFilter.genders));
+            if (oierFilter.enroll_min !== undefined) { oierWhere.push('o.enroll_middle >= ?'); oierParams.push(Number(oierFilter.enroll_min)); }
+            if (oierFilter.enroll_max !== undefined) { oierWhere.push('o.enroll_middle <= ?'); oierParams.push(Number(oierFilter.enroll_max)); }
+            pushInClause(oierWhere, oierParams, 'o.initials', toArray(oierFilter.initials));
+        }
+
+        if (needsContestJoin) fromClause += ' JOIN Contest c ON r.contest_id = c.id';
+        
         const initialRecordWhereClauses = [], initialRecordParams = [];
+        // 注意这里的别名是 'r'
         pushInClause(initialRecordWhereClauses, initialRecordParams, 'r.level', toArray(filter.level ?? filter.levels));
         if (filter.min_score !== undefined) { initialRecordWhereClauses.push('r.score >= ?'); initialRecordParams.push(Number(filter.min_score)); }
         if (filter.max_score !== undefined) { initialRecordWhereClauses.push('r.score <= ?'); initialRecordParams.push(Number(filter.max_score)); }
@@ -149,12 +175,14 @@ function buildRecordSubquery(filter = {}, candidateUids = null) {
         pushInClause(initialRecordWhereClauses, initialRecordParams, 'r.province', toArray(filter.province ?? filter.provinces));
         pushInClause(initialRecordWhereClauses, initialRecordParams, 'r.school_id', toArray(filter.school_id ?? filter.school_ids));
         pushInClause(initialRecordWhereClauses, initialRecordParams, 'r.contest_id', toArray(filter.contest_id ?? filter.contest_ids));
-        const whereClauses = [...initialRecordWhereClauses, ...contestWhere];
+        
+        // 合并所有 WHERE 条件
+        const whereClauses = [...oierWhere, ...initialRecordWhereClauses, ...contestWhere];
         const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
         const sql = `SELECT DISTINCT r.oier_uid FROM ${fromClause} ${whereSql}`;
-        const params = [...initialRecordParams, ...contestParams];
+        const params = [...oierParams, ...initialRecordParams, ...contestParams];
         return { sql, params, filterParamCount };
-    } else {
+    } else { // 后续查询，逻辑保持不变
         const placeholders = candidateUids.map(() => '?').join(',');
         const cteSql = `WITH CandidateRecords AS (SELECT * FROM Record WHERE oier_uid IN (${placeholders}) LIMIT -1)`;
         let fromClause = 'CandidateRecords cr';
@@ -166,7 +194,6 @@ function buildRecordSubquery(filter = {}, candidateUids = null) {
         return { sql, params, filterParamCount };
     }
 }
-
 const D1_MAX_VARS = 100;
 // --- 主处理器 ---
 export default async function queryOierHandler(c) {
@@ -176,7 +203,6 @@ export default async function queryOierHandler(c) {
     const ADMIN_SECRET = c.env.ADMIN_SECRET;
     const clientSecret = c.req.header('X-Admin-Secret');
     const isAdmin = ADMIN_SECRET && clientSecret === ADMIN_SECRET;
-    
     try {
         const initialRecordFilters = toArray(payload.record_filters);
         const oierFilters = payload.oier_filters ?? {};
@@ -203,8 +229,8 @@ export default async function queryOierHandler(c) {
             let shouldAdd = true;
             const nextAcc = [];
             for (const existing of acc) {
-                if (isSubset(current, existing)) {} 
-                else if (isSubset(existing, current)) { shouldAdd = false; nextAcc.push(existing); } 
+                if (isSubset(current, existing)) {}
+                else if (isSubset(existing, current)) { shouldAdd = false; nextAcc.push(existing); }
                 else { nextAcc.push(existing); }
             }
             if (shouldAdd) nextAcc.push(current);
@@ -218,65 +244,58 @@ export default async function queryOierHandler(c) {
             return c.json({ error: `Query is too broad. Your query strength score is ${totalStrength}, minimum required is ${MINIMUM_QUERY_STRENGTH}.` }, 400);
         }
         const recordFilters = processedFilters.sort((a, b) => getFilterSelectivity(a) - getFilterSelectivity(b));
-        
         // --- 阶段 1: 核心查询逻辑 ---
         const usageSteps = [];
-        let candidateUids = null; 
+        let candidateUids = null;
+
+        // [新增] 判断 OIer 过滤器是否需要在第一步就应用
+        const hasOierFilters = oierFilters && (
+            toArray(oierFilters.gender ?? oierFilters.genders).length > 0 ||
+            oierFilters.enroll_min !== undefined ||
+            oierFilters.enroll_max !== undefined ||
+            toArray(oierFilters.initials).length > 0
+        );
+        const oierFiltersAppliedEarly = recordFilters.length > 0 && hasOierFilters;
+
         if (recordFilters.length > 0 && getFilterSelectivity(recordFilters[0]) < 1) {
             candidateUids = [];
         } else {
-            
             const VERIFICATION_THRESHOLD = 50;
             let verificationMode = false;
             const oierRecordsMap = new Map();
             for (let i = 0; i < recordFilters.length; i++) {
                 const filter = recordFilters[i];
                 if (candidateUids !== null && candidateUids.length === 0) break;
-
-                // [核心修改] i === 0 时的查询逻辑
                 if (i === 0 && candidateUids === null) {
-                    // 1. 构建 Record 表的筛选条件
-                    const recordWhere = [], recordParams = [];
-                    pushInClause(recordWhere, recordParams, 'r.level', toArray(filter.level ?? filter.levels));
-                    if (filter.min_score !== undefined) { recordWhere.push('r.score >= ?'); recordParams.push(Number(filter.min_score)); }
-                    if (filter.max_score !== undefined) { recordWhere.push('r.score <= ?'); recordParams.push(Number(filter.max_score)); }
-                    if (filter.min_rank !== undefined) { recordWhere.push('r.rank >= ?'); recordParams.push(Number(filter.min_rank)); }
-                    if (filter.max_rank !== undefined) { recordWhere.push('r.rank <= ?'); recordParams.push(Number(filter.max_rank)); }
-                    pushInClause(recordWhere, recordParams, 'r.province', toArray(filter.province ?? filter.provinces));
-                    pushInClause(recordWhere, recordParams, 'r.school_id', toArray(filter.school_id ?? filter.school_ids));
-                    pushInClause(recordWhere, recordParams, 'r.contest_id', toArray(filter.contest_id ?? filter.contest_ids));
-                    
-                    // 2. 构建 Contest 表的筛选条件
+                    let effectiveFilter = { ...filter };
+                    // [关键性能点] 保持 contest id 预筛选逻辑不变
                     const contestWhere = [], contestParams = [];
-                    if (filter.year_start) { contestWhere.push('c.year >= ?'); contestParams.push(filter.year_start); }
-                    if (filter.year_end) { contestWhere.push('c.year <= ?'); contestParams.push(filter.year_end); }
-                    if (filter.fall_semester !== undefined) { contestWhere.push('c.fall_semester = ?'); contestParams.push(filter.fall_semester ? 1 : 0); }
-                    pushInClause(contestWhere, contestParams, 'c.type', toArray(filter.contest_type ?? filter.contest_types));
-
-                    // 3. 构建 OIer 表的筛选条件
-                    const oierWhere = [], oierParams = [];
-                    pushInClause(oierWhere, oierParams, 'o.gender', toArray(oierFilters.gender ?? oierFilters.genders));
-                    if (oierFilters.enroll_min !== undefined) { oierWhere.push('o.enroll_middle >= ?'); oierParams.push(Number(oierFilters.enroll_min)); }
-                    if (oierFilters.enroll_max !== undefined) { oierWhere.push('o.enroll_middle <= ?'); oierParams.push(Number(oierFilters.enroll_max)); }
-                    pushInClause(oierWhere, oierParams, 'o.initials', toArray(oierFilters.initials));
-
-                    // 4. 组合 FROM, WHERE 和 PARAMS
-                    const fromClause = `FROM Record r JOIN OIer o ON r.oier_uid = o.uid` + (contestWhere.length > 0 ? ` JOIN Contest c ON r.contest_id = c.id` : '');
-                    const allWhereClauses = [...recordWhere, ...contestWhere, ...oierWhere];
-                    const whereSql = allWhereClauses.length > 0 ? `WHERE ${allWhereClauses.join(' AND ')}` : '';
-                    const allParams = [...recordParams, ...contestParams, ...oierParams];
+                    if (filter.year_start || filter.year_end || filter.fall_semester !== undefined || toArray(filter.contest_type ?? filter.contest_types).length > 0) {
+                        if (filter.year_start) { contestWhere.push('c.year >= ?'); contestParams.push(filter.year_start); }
+                        if (filter.year_end) { contestWhere.push('c.year <= ?'); contestParams.push(filter.year_end); }
+                        if (filter.fall_semester !== undefined) { contestWhere.push('c.fall_semester = ?'); contestParams.push(filter.fall_semester ? 1 : 0); }
+                        pushInClause(contestWhere, contestParams, 'c.type', toArray(filter.contest_type ?? filter.contest_types));
+                    }
+                    if (contestWhere.length > 0) {
+                        const contestSql = `SELECT id FROM Contest c WHERE ${contestWhere.join(' AND ')}`;
+                        const { results: contestResults, meta: contestMeta } = await c.env.DB.prepare(contestSql).bind(...contestParams).all();
+                        usageSteps.push(formatUsageStep("initial_contest_prefilter", contestMeta));
+                        const candidateContestIds = contestResults ? contestResults.map(row => row.id) : [];
+                        if (candidateContestIds.length === 0) { candidateUids = []; break; }
+                        const existingIds = toArray(effectiveFilter.contest_id ?? effectiveFilter.contest_ids);
+                        effectiveFilter.contest_ids = [...new Set([...existingIds, ...candidateContestIds])];
+                    }
                     
-                    // 5. 执行组合查询
-                    const sql = `SELECT DISTINCT r.oier_uid ${fromClause} ${whereSql}`;
-                    const { results: recordResults, meta: recordMeta } = await c.env.DB.prepare(sql).bind(...allParams).all();
-                    usageSteps.push(formatUsageStep("initial_combined_query", recordMeta));
-
+                    // [修改] 调用修改后的 buildRecordSubquery，传入 oierFilters
+                    const { sql, params } = buildRecordSubquery(effectiveFilter, null, oierFilters);
+                    const { results: recordResults, meta: recordMeta } = await c.env.DB.prepare(sql).bind(...params).all();
+                    usageSteps.push(formatUsageStep("initial_record_query", recordMeta));
                     const uids = new Set();
                     if (recordResults) recordResults.forEach(row => uids.add(row.oier_uid));
                     candidateUids = Array.from(uids);
                     continue;
                 }
-
+                // 后续的 verificationMode 和 chunking 逻辑保持不变
                 if (!verificationMode && candidateUids !== null && candidateUids.length > 0 && candidateUids.length < VERIFICATION_THRESHOLD) {
                     verificationMode = true;
                     const chunks = [];
@@ -325,7 +344,6 @@ export default async function queryOierHandler(c) {
                 }
             }
         }
-        
         // --- 阶段 2: 最终 OIer 查询 ---
         if (candidateUids !== null) {
             candidateUids.sort((a, b) => a - b);
@@ -340,31 +358,37 @@ export default async function queryOierHandler(c) {
             }
         }
         
+        const oierWhereClauses = [], oierBaseParams = [];
+        // [修改] 只有在 OIer 过滤器没有被提前应用时，才在这里构建筛选条件
+        if (!oierFiltersAppliedEarly) {
+            pushInClause(oierWhereClauses, oierBaseParams, 'o.gender', toArray(oierFilters.gender ?? oierFilters.genders));
+            if (oierFilters.enroll_min !== undefined) { oierWhereClauses.push('o.enroll_middle >= ?'); oierBaseParams.push(Number(oierFilters.enroll_min)); }
+            if (oierFilters.enroll_max !== undefined) { oierWhereClauses.push('o.enroll_middle <= ?'); oierBaseParams.push(Number(oierFilters.enroll_max)); }
+            pushInClause(oierWhereClauses, oierBaseParams, 'o.initials', toArray(oierFilters.initials));
+        }
+
+        if (oierBaseParams.length >= D1_MAX_VARS) { return c.json({ error: "Oier filter is too complex..." }, 400); }
+        
         let allOiers = [];
-        // [核心修改] 如果 candidateUids 已存在, 则说明 OIer 信息已被预筛选, 直接根据 UID 查询即可。
         if (candidateUids !== null) {
+            const dynamicChunkSize = D1_MAX_VARS - oierBaseParams.length;
             const chunks = [];
-            for (let i = 0; i < candidateUids.length; i += D1_MAX_VARS) { chunks.push(candidateUids.slice(i, i + D1_MAX_VARS)); }
-            
+            for (let i = 0; i < candidateUids.length; i += dynamicChunkSize) { chunks.push(candidateUids.slice(i, i + dynamicChunkSize)); }
             const promises = chunks.map((chunk) => {
-                const placeholders = chunk.map(() => '?').join(',');
-                const sql = `SELECT * FROM OIer WHERE uid IN (${placeholders});`;
-                return c.env.DB.prepare(sql).bind(...chunk).all();
+                const chunkWhere = [...oierWhereClauses];
+                const chunkParams = [...oierBaseParams];
+                pushInClause(chunkWhere, chunkParams, 'o.uid', chunk);
+                // 如果 chunkWhere 为空（因为提前筛选了），这里会自动变成 WHERE o.uid IN (...)
+                const whereClause = `WHERE ${chunkWhere.join(' AND ')}`;
+                const sql = `SELECT * FROM OIer o $     {whereClause};`;
+                return c.env.DB.prepare(sql).bind(...chunkParams).all();
             });
             const resultsFromChunks = await Promise.all(promises);
             resultsFromChunks.forEach((res, chunkIndex) => {
                 usageSteps.push(formatUsageStep(`final_oier_query_chunk_${chunkIndex}`, res.meta));
                 if (res.results) allOiers.push(...res.results);
             });
-        } else {
-            // [逻辑保留] 如果没有 record_filters (candidateUids 为 null), 则仍然使用 oierFilters 进行查询。
-            const oierWhereClauses = [], oierBaseParams = [];
-            pushInClause(oierWhereClauses, oierBaseParams, 'o.gender', toArray(oierFilters.gender ?? oierFilters.genders));
-            if (oierFilters.enroll_min !== undefined) { oierWhereClauses.push('o.enroll_middle >= ?'); oierBaseParams.push(Number(oierFilters.enroll_min)); }
-            if (oierFilters.enroll_max !== undefined) { oierWhereClauses.push('o.enroll_middle <= ?'); oierBaseParams.push(Number(oierFilters.enroll_max)); }
-            pushInClause(oierWhereClauses, oierBaseParams, 'o.initials', toArray(oierFilters.initials));
-            if (oierFilters.min_oierdb_score !== undefined) { oierWhereClauses.push('o.oierdb_score >= ?'); oierBaseParams.push(Number(oierFilters.min_oierdb_score)); }
-
+        } else { // candidateUids 为 null，意味着没有 record_filters
             const whereClause = oierWhereClauses.length > 0 ? `WHERE ${oierWhereClauses.join(' AND ')}` : '';
             const sql = `SELECT * FROM OIer o ${whereClause} ORDER BY o.uid ASC LIMIT ?;`;
             const params = [...oierBaseParams, limit];
@@ -374,8 +398,8 @@ export default async function queryOierHandler(c) {
         }
         
         allOiers.sort((a, b) => a.uid - b.uid);
-        
         const finalResults = allOiers;
+        
         const responsePayload = { data: finalResults };
         if (isAdmin) {
             const totals = usageSteps.reduce((acc, step) => { acc.rows_read += step.rows_read; acc.rows_written += step.rows_written; return acc; }, { rows_read: 0, rows_written: 0 });
