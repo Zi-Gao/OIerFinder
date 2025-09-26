@@ -380,7 +380,7 @@ export default async function queryOierHandler(c) {
                 pushInClause(chunkWhere, chunkParams, 'o.uid', chunk);
                 // 如果 chunkWhere 为空（因为提前筛选了），这里会自动变成 WHERE o.uid IN (...)
                 const whereClause = `WHERE ${chunkWhere.join(' AND ')}`;
-                const sql = `SELECT * FROM OIer o $     {whereClause};`;
+                const sql = `SELECT * FROM OIer o ${whereClause};`;
                 return c.env.DB.prepare(sql).bind(...chunkParams).all();
             });
             const resultsFromChunks = await Promise.all(promises);
