@@ -1,8 +1,6 @@
 // cloudflare/worker/functions/query_oier.js
-
 // 1. [数据导入] 从外部 JSON 文件导入预计算的统计数据。
 import CONTEST_STATS_DATA from './contest_stats.json';
-
 // --- 业务逻辑与安全常量 ---
 const { min_year, max_year, stats: CONTEST_STATS } = CONTEST_STATS_DATA;
 const STRENGTH_SCORES = {
@@ -21,12 +19,109 @@ const CONTEST_PRIORITY = {
 };
 const MINIMUM_QUERY_STRENGTH = 20;
 const MAX_FILTERS_ALLOWED = 20;
-
 // --- 辅助函数 ---
 function toArray(value) { if (value === undefined || value === null) return []; return Array.isArray(value) ? value.filter(v => v !== undefined && v !== null) : [value]; }
 function pushInClause(targetWhere, targetParams, column, values) { if (!values || values.length === 0) return; if (values.length === 1) { targetWhere.push(`${column} = ?`); targetParams.push(values[0]); } else { const placeholders = values.map(() => '?').join(','); targetWhere.push(`${column} IN (${placeholders})`); targetParams.push(...values); } }
 function formatUsageStep(name, meta) { return { name, rows_read: meta?.rows_read ?? 0, rows_written: meta?.rows_written ?? 0, duration_ms: meta?.duration ?? 0 }; }
 function normalizeLimit(value, fallback = 100) { const num = Number(value); if (!Number.isFinite(num) || num <= 0) return fallback; return Math.min(Math.floor(num), 100); }
+
+// [新增] 输入验证与清理函数，作为第一道安全防线
+const ALLOWED_RECORD_KEYS = new Set([
+    'level', 'levels', 'min_score', 'max_score', 'min_rank', 'max_rank',
+    'province', 'provinces', 'school_id', 'school_ids', 'contest_id', 'contest_ids',
+    'year', 'years', 'year_start', 'year_end', 'fall_semester', 'contest_type', 'contest_types'
+]);
+const ALLOWED_OIER_KEYS = new Set(['gender', 'genders', 'enroll_min', 'enroll_max', 'initials']);
+
+function validateAndSanitizeFilter(filter, allowedKeys) {
+    if (typeof filter !== 'object' || filter === null || Array.isArray(filter)) {
+        throw new Error('Filter must be an object.');
+    }
+    const sanitized = {};
+    for (const [key, rawValue] of Object.entries(filter)) {
+        if (!allowedKeys.has(key)) {
+            throw new Error(`Invalid filter parameter: '${key}'`);
+        }
+        if (rawValue === undefined || rawValue === null) continue;
+
+        // 对不同类型的 key 进行类型检查和清理
+        switch (key) {
+            // 数值型
+            case 'year': case 'year_start': case 'year_end':
+            case 'enroll_min': case 'enroll_max':
+            case 'min_score': case 'max_score':
+            case 'min_rank': case 'max_rank':
+            case 'school_id': case 'contest_id':
+                const num = Number(rawValue);
+                if (!Number.isFinite(num)) throw new Error(`'${key}' must be a valid number.`);
+                sanitized[key] = num;
+                break;
+            // 布尔型
+            case 'fall_semester':
+                sanitized[key] = Boolean(rawValue);
+                break;
+            // 字符串型
+            case 'level': case 'province': case 'contest_type':
+                if (typeof rawValue !== 'string' || rawValue.trim().length === 0) throw new Error(`'${key}' must be a non-empty string.`);
+                sanitized[key] = rawValue.trim();
+                break;
+            // 数值数组
+            case 'years': case 'school_ids': case 'contest_ids':
+                const numArray = toArray(rawValue).map(Number);
+                if (numArray.some(n => !Number.isFinite(n))) throw new Error(`All items in '${key}' must be valid numbers.`);
+                sanitized[key] = numArray;
+                break;
+            // 字符串数组
+            case 'levels': case 'provinces': case 'contest_types': case 'genders': case 'initials':
+                const strArray = toArray(rawValue);
+                if (strArray.some(s => typeof s !== 'string' || s.trim().length === 0)) throw new Error(`All items in '${key}' must be non-empty strings.`);
+                sanitized[key] = strArray.map(s => s.trim());
+                break;
+            // 兼容性字段 (gender -> genders)
+            case 'gender':
+                if (typeof rawValue !== 'string' || rawValue.trim().length === 0) throw new Error(`'${key}' must be a non-empty string.`);
+                 // 统一转换为复数形式
+                sanitized['genders'] = [rawValue.trim()];
+                break;
+            default:
+                sanitized[key] = rawValue; // 对于未明确处理但允许的键，直接赋值
+                break;
+        }
+    }
+    return sanitized;
+}
+
+function validateAndSanitizePayload(payload) {
+    if (typeof payload !== 'object' || payload === null) {
+        throw new Error("Request body must be a valid JSON object.");
+    }
+
+    const sanitizedPayload = {
+        record_filters: [],
+        oier_filters: {},
+        limit: 100
+    };
+
+    // 验证 record_filters
+    if (payload.record_filters !== undefined) {
+        if (!Array.isArray(payload.record_filters)) {
+            throw new Error("'record_filters' must be an array.");
+        }
+        sanitizedPayload.record_filters = payload.record_filters.map(f => validateAndSanitizeFilter(f, ALLOWED_RECORD_KEYS));
+    }
+
+    // 验证 oier_filters
+    if (payload.oier_filters !== undefined) {
+        sanitizedPayload.oier_filters = validateAndSanitizeFilter(payload.oier_filters, ALLOWED_OIER_KEYS);
+    }
+    
+    // 验证和标准化 limit
+    if (payload.limit !== undefined) {
+        sanitizedPayload.limit = normalizeLimit(payload.limit);
+    }
+
+    return sanitizedPayload;
+}
 
 // --- 过滤器处理与排序函数 ---
 function isSubset(filterA, filterB) {
@@ -44,7 +139,6 @@ function isSubset(filterA, filterB) {
         if (maxA !== undefined && (maxB === undefined || maxA > maxB)) return false;
         return true;
     };
-    // [修改] 添加对 years 字段的子集检查
     const checkYears = () => {
         const yearsA = toArray(filterA.years);
         const yearsB = toArray(filterB.years);
@@ -57,13 +151,12 @@ function isSubset(filterA, filterB) {
     return check('level', 'levels') && check('province', 'provinces') &&
            check('school_id', 'school_ids') && check('contest_id', 'contest_ids') &&
            check('contest_type', 'contest_types') &&
-           checkYears() && // 新增对 years 的检查
-           (toArray(filterA.years).length > 0 ? true : checkRange('year_start', 'year_end')) && // 仅在 A 不使用 years 时检查范围
+           checkYears() &&
+           (toArray(filterA.years).length > 0 ? true : checkRange('year_start', 'year_end')) &&
            checkRange('min_score', 'max_score') && checkRange('min_rank', 'max_rank');
 }
 function getFilterSelectivity(filter) {
     if (filter.contest_id || filter.school_id) return 1;
-    // [修改] 优先使用 years 数组，否则回退到年份范围
     let years;
     const yearsArray = toArray(filter.years);
     if (yearsArray.length > 0) {
@@ -101,7 +194,6 @@ function getFilterStrength(filter, isOierFilter = false) {
     }
     if (filter.contest_id || filter.contest_ids) score += STRENGTH_SCORES.CONTEST_ID;
     if (filter.school_id || filter.school_ids) score += STRENGTH_SCORES.SCHOOL_ID;
-    // [修改] 将 years 添加到查询强度计算中
     if (filter.years || filter.year_start || filter.year_end) score += STRENGTH_SCORES.YEAR;
     if (filter.province || filter.provinces) score += STRENGTH_SCORES.PROVINCE;
     if (filter.level || filter.levels) score += STRENGTH_SCORES.LEVEL;
@@ -130,21 +222,15 @@ function recordMatchesFilter(record, filter) {
     if (school_ids.length > 0 && !school_ids.includes(record.school_id)) return false;
     const contest_ids = toArray(filter.contest_id ?? filter.contest_ids);
     if (contest_ids.length > 0 && !contest_ids.includes(record.contest_id)) return false;
-
-    // [修改] 添加对 years 数组的检查
     const years = toArray(filter.years);
     if (years.length > 0 && !years.includes(record.year)) return false;
-
-    // 只有在没有 `years` 筛选时，以下筛选才会生效（由预处理器保证）
     if (filter.year_start !== undefined && record.year < Number(filter.year_start)) return false;
     if (filter.year_end !== undefined && record.year > Number(filter.year_end)) return false;
-
     if (filter.fall_semester !== undefined && record.fall_semester !== (filter.fall_semester ? 1 : 0)) return false;    
     const contest_types = toArray(filter.contest_type ?? filter.contest_types);
     if (contest_types.length > 0 && !contest_types.includes(record.type)) return false;
     return true;
 }
-
 function buildRecordSubquery(filter = {}, candidateUids = null, oierFilter = {}) {
     const recordWhere = [], recordParams = [];
     const contestWhere = [], contestParams = [];
@@ -158,16 +244,11 @@ function buildRecordSubquery(filter = {}, candidateUids = null, oierFilter = {})
     pushInClause(recordWhere, recordParams, 'cr.school_id', toArray(filter.school_id ?? filter.school_ids));
     pushInClause(recordWhere, recordParams, 'cr.contest_id', toArray(filter.contest_id ?? filter.contest_ids));
     
-    // [修改] 将 years 添加到比赛过滤条件判断中
     const hasContestFilter = filter.year_start || filter.year_end || toArray(filter.years).length > 0 || filter.fall_semester !== undefined || toArray(filter.contest_type ?? filter.contest_types).length > 0;
     if (hasContestFilter) {
-        // [修改] 使用 pushInClause 处理 years 数组，生成 IN 子句
         pushInClause(contestWhere, contestParams, 'c.year', toArray(filter.years));
-        
-        // 只有在没有 `years` 筛选时，以下筛选才会生效（由预处理器保证）
         if (filter.year_start) { contestWhere.push('c.year >= ?'); contestParams.push(filter.year_start); }
         if (filter.year_end) { contestWhere.push('c.year <= ?'); contestParams.push(filter.year_end); }
-        
         if (filter.fall_semester !== undefined) { contestWhere.push('c.fall_semester = ?'); contestParams.push(filter.fall_semester ? 1 : 0); }
         pushInClause(contestWhere, contestParams, 'c.type', toArray(filter.contest_type ?? filter.contest_types));
     }
@@ -226,43 +307,45 @@ const D1_MAX_VARS = 100;
 // --- 主处理器 ---
 export default async function queryOierHandler(c) {
     if (c.req.method !== "POST") return c.json({ error: "Only POST is supported" }, 405);
-    let payload;
-    try { payload = await c.req.json(); } catch (err) { return c.json({ error: "Invalid JSON" }, 400); }
-    const ADMIN_SECRET = c.env.ADMIN_SECRET;
-    const clientSecret = c.req.header('X-Admin-Secret');
-    const isAdmin = ADMIN_SECRET && clientSecret === ADMIN_SECRET;
+
     try {
-        const initialRecordFilters = toArray(payload.record_filters);
-        const oierFilters = payload.oier_filters ?? {};
-        const limit = normalizeLimit(payload.limit);
+        let payload;
+        try { payload = await c.req.json(); } catch (err) { return c.json({ error: "Invalid JSON" }, 400); }
+
+        // [新增] 阶段 -1: 输入验证与清理
+        // 在这里调用新的验证函数，如果输入不合法，它会抛出错误，被外层 try...catch 捕获并返回 400 错误。
+        const validatedPayload = validateAndSanitizePayload(payload);
+
+        const ADMIN_SECRET = c.env.ADMIN_SECRET;
+        const clientSecret = c.req.header('X-Admin-Secret');
+        const isAdmin = ADMIN_SECRET && clientSecret === ADMIN_SECRET;
+
+        // [修改] 使用经过验证和清理后的数据
+        const initialRecordFilters = validatedPayload.record_filters;
+        const oierFilters = validatedPayload.oier_filters;
+        const limit = validatedPayload.limit;
+
         // --- 阶段 0: 安全检查与过滤器预处理 ---
         if (!isAdmin && initialRecordFilters.length > MAX_FILTERS_ALLOWED) {
             return c.json({ error: `Too many record filters. A maximum of ${MAX_FILTERS_ALLOWED} is allowed.` }, 400);
         }
         let processedFilters = initialRecordFilters.map(f => {
             let filter = { ...f };
-
-            // [新增] 建立年份筛选的优先级: years > year > year_start/year_end
             const yearsArray = toArray(filter.years);
             if (yearsArray.length > 0) {
-                // 如果 `years` 存在，它拥有最高优先级，删除其他年份字段以避免冲突
                 delete filter.year;
                 delete filter.year_start;
                 delete filter.year_end;
             } else if (filter.year) {
-                // `year` 是 `year_start` 和 `year_end` 的简写
                 filter.year_start = filter.year;
                 filter.year_end = filter.year;
-                delete filter.year; // 清理掉原始的 year 字段
+                delete filter.year;
             }
-
-            // 对年份范围进行标准化，确保其在有效范围内
             filter.year_start = Math.max(filter.year_start ?? min_year, min_year);
             filter.year_end = Math.min(filter.year_end ?? max_year, max_year);
             
             return filter;
         }).filter(f => {
-            // [修改] 过滤掉过于宽泛的查询时，也要考虑 years 是否存在
             const isTooBroad = toArray(f.years).length === 0 && f.year_start <= min_year && f.year_end >= max_year;
             const hasOtherConditions = Object.keys(f).some(k => !['year', 'years', 'year_start', 'year_end'].includes(k));
             return !(isTooBroad && !hasOtherConditions);
@@ -278,7 +361,6 @@ export default async function queryOierHandler(c) {
             if (shouldAdd) nextAcc.push(current);
             return nextAcc;
         }, []);
-        // [修改] 在计算强度时，getFilterStrength 已经更新，此处无需改动
         const totalStrength = processedFilters.reduce((sum, f) => sum + getFilterStrength(f), 0) + getFilterStrength(oierFilters, true);
         if (processedFilters.length === 0 && Object.keys(oierFilters).length === 0) {
             return c.json({ error: "Query is too broad. Please provide at least one filter." }, 400);
@@ -309,7 +391,6 @@ export default async function queryOierHandler(c) {
                 if (i === 0 && candidateUids === null) {
                     let effectiveFilter = { ...filter };
                     const contestWhere = [], contestParams = [];
-                    // [修改] 此处构建预查询的逻辑也需要加入 years
                     const yearFiltersExist = filter.year_start || filter.year_end || toArray(filter.years).length > 0;
                     if (yearFiltersExist || filter.fall_semester !== undefined || toArray(filter.contest_type ?? filter.contest_types).length > 0) {
                         pushInClause(contestWhere, contestParams, 'c.year', toArray(filter.years));
@@ -336,7 +417,6 @@ export default async function queryOierHandler(c) {
                     candidateUids = Array.from(uids);
                     continue;
                 }
-                // 后续的 verificationMode 和 chunking 逻辑保持不变...
                 if (!verificationMode && candidateUids !== null && candidateUids.length > 0 && candidateUids.length < VERIFICATION_THRESHOLD) {
                     verificationMode = true;
                     const chunks = [];
@@ -449,8 +529,20 @@ export default async function queryOierHandler(c) {
         }
         return c.json(responsePayload);
     } catch (err) {
+        // [修改] 统一的错误处理，可以捕获验证错误和执行错误
         console.error('Error in queryOierHandler:', err);
+        
+        // 检查是否是我们的验证错误，如果是，返回一个更具体的 400 错误
+        // 否则，返回通用的 500 错误
+        const isValidationError = err.message.startsWith('Invalid') || err.message.includes('must be');
+        if (isValidationError) {
+            return c.json({ error: err.message }, 400);
+        }
+
         const errorResponse = { error: 'An internal server error occurred.' };
+        // is adamin check needs to happen outside the try block to avoid undefined variable
+        const clientSecret = c.req.header('X-Admin-Secret');
+        const isAdmin = c.env.ADMIN_SECRET && clientSecret === c.env.ADMIN_SECRET;
         if (isAdmin) {
             errorResponse.details = err.message;
             errorResponse.stack = err.stack;

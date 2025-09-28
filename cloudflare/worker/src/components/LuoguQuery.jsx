@@ -1,14 +1,12 @@
-// src/components/LuoguQuery.jsx (修改)
+// src/components/LuoguQuery.jsx
 import React, { useState } from 'react';
-import { getLuoguPrizes, getQueryFromJson, searchOiers } from '../api/client';
-import ResultsDisplay from './ResultsDisplay';
+import { getLuoguPrizes, getQueryFromJson } from '../api/client';
 
-// 接收 adminSecret 和 limit
-function LuoguQuery({ adminSecret, limit }) {
+// 接收 onImportQuery 回调函数
+function LuoguQuery({ adminSecret, onImportQuery }) {
   const [uid, setUid] = useState('');
   const [prizes, setPrizes] = useState(null);
-  const [results, setResults] = useState(null);
-  const [loading, setLoading] = useState({ prizes: false, search: false });
+  const [loading, setLoading] = useState({ prizes: false, import: false });
   const [error, setError] = useState('');
 
   const handleFetchPrizes = async () => {
@@ -22,29 +20,24 @@ function LuoguQuery({ adminSecret, limit }) {
     try {
       const data = await getLuoguPrizes(uid, adminSecret);
       setPrizes(data);
-    } catch (err) {
+    } catch (err) { // <<< CORRECTED SYNTAX HERE
       setError(err.message);
     } finally {
       setLoading({ ...loading, prizes: false });
     }
   };
 
-  const handleSearch = async () => {
-    setLoading({ ...loading, search: true });
+  // [修改] 这个函数现在不执行搜索，而是导入配置
+  const handleImport = async () => {
+    setLoading({ ...loading, import: true });
     setError('');
-    setResults(null);
     try {
       const queryPayload = await getQueryFromJson(uid, adminSecret);
-      
-      // *** 关键修改：将全局 limit 添加到查询体中 ***
-      queryPayload.limit = limit;
-
-      const data = await searchOiers(queryPayload, adminSecret);
-      setResults(data);
-    } catch (err) {
+      onImportQuery(queryPayload); // 调用 App 传来的函数
+    } catch (err) { // <<< AND CORRECTED SYNTAX HERE
       setError(err.message);
     } finally {
-      setLoading({ ...loading, search: false });
+      setLoading({ ...loading, import: false });
     }
   };
 
@@ -66,6 +59,15 @@ function LuoguQuery({ adminSecret, limit }) {
           </button>
         </div>
       </div>
+      
+      {/* 显示错误信息 */}
+      {error && (
+        <div className="p-4 bg-red-900 border border-red-700 text-red-200 rounded-lg">
+          <p className="font-bold">An Error Occurred</p>
+          <p className="text-sm">{error}</p>
+        </div>
+      )}
+
       {prizes && (
         <div className="bg-gray-700 p-4 rounded-lg">
           <h3 className="text-lg font-semibold mb-2">Awards Found ({prizes.length})</h3>
@@ -89,14 +91,13 @@ function LuoguQuery({ adminSecret, limit }) {
               </tbody>
             </table>
           </div>
-          <button onClick={handleSearch} disabled={loading.search} className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-500">
-            {loading.search ? 'Searching...' : 'Search OIerDB with these awards'}
+          <button onClick={handleImport} disabled={loading.import} className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-500">
+            {loading.import ? 'Importing...' : 'Import to UI Builder'}
           </button>
         </div>
       )}
-      <ResultsDisplay results={results} error={error} loading={loading.search || loading.prizes} />
+      {/* ResultsDisplay has been moved to App.jsx */}
     </div>
   );
 }
-
 export default LuoguQuery;

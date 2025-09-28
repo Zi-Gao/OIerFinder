@@ -1,8 +1,10 @@
-// src/App.jsx (修改)
-import React, { useState, useEffect } from 'react'; // 1. 导入 useEffect
+// src/App.jsx
+import React, { useState, useEffect } from 'react';
 import QueryBuilder from './components/QueryBuilder';
 import JsonQuery from './components/JsonQuery';
 import LuoguQuery from './components/LuoguQuery';
+import ResultsDisplay from './components/ResultsDisplay'; // 引入 ResultsDisplay
+import { searchOiers } from './api/client'; // 引入 searchOiers
 
 const TABS = {
   BUILDER: 'UI Builder',
@@ -10,38 +12,125 @@ const TABS = {
   LUOGU: 'Luogu UID',
 };
 
+// 辅助函数：清理过滤器中的空值
+const cleanObject = (obj) => {
+    const newObj = {};
+    for (const key in obj) {
+        const value = obj[key];
+        if (value !== '' && value !== null && value !== undefined) {
+            newObj[key] = value;
+        }
+    }
+    return newObj;
+};
+
 function App() {
   const [activeTab, setActiveTab] = useState(TABS.BUILDER);
   
-  // 2. 使用函数式初始值从 localStorage 加载数据
-  // 这确保了 localStorage 只在组件首次渲染时被读取一次
-  const [adminSecret, setAdminSecret] = useState(
-    () => localStorage.getItem('oierFinderAdminSecret') || ''
-  );
-  const [limit, setLimit] = useState(
-    () => parseInt(localStorage.getItem('oierFinderLimit'), 10) || 10
-  );
+  // --- 共享的查询状态 ---
+  const [recordFilters, setRecordFilters] = useState([{}]);
+  const [oierFilters, setOierFilters] = useState({});
 
-  // 3. 使用 useEffect 在数据变化时将其保存到 localStorage
+  // --- 共享的结果状态 ---
+  const [results, setResults] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  // --- 全局设置状态 ---
+  const [adminSecret, setAdminSecret] = useState(() => localStorage.getItem('oierFinderAdminSecret') || '');
+  const [limit, setLimit] = useState(() => parseInt(localStorage.getItem('oierFinderLimit'), 10) || 10);
+
   useEffect(() => {
     localStorage.setItem('oierFinderAdminSecret', adminSecret);
-  }, [adminSecret]); // 这个 effect 只在 adminSecret 变化时运行
+  }, [adminSecret]);
 
   useEffect(() => {
     localStorage.setItem('oierFinderLimit', limit);
-  }, [limit]); // 这个 effect 只在 limit 变化时运行
+  }, [limit]);
 
+  // --- [新增] 核心搜索函数，由 App 组件统一执行 ---
+  const handleSearch = async (currentRecordFilters, currentOierFilters) => {
+    setLoading(true);
+    setError('');
+    setResults(null);
+    
+    const stringToArray = (str) => str.split(',').map(item => item.trim()).filter(Boolean);
+    const stringToNumberArray = (str) => stringToArray(str).map(Number);
+
+    const processedRecordFilters = currentRecordFilters
+      .map(f => {
+        const cleaned = cleanObject(f);
+        if (cleaned.provinces && typeof cleaned.provinces === 'string') cleaned.provinces = stringToArray(cleaned.provinces);
+        if (cleaned.years && typeof cleaned.years === 'string') cleaned.years = stringToNumberArray(cleaned.years);
+        if (cleaned.contest_ids && typeof cleaned.contest_ids === 'string') cleaned.contest_ids = stringToNumberArray(cleaned.contest_ids);
+        if (cleaned.school_ids && typeof cleaned.school_ids === 'string') cleaned.school_ids = stringToNumberArray(cleaned.school_ids);
+        return cleaned;
+      })
+      .filter(f => Object.keys(f).length > 0);
+      
+    const processedOierFilters = cleanObject(currentOierFilters);
+    if (processedOierFilters.initials && typeof processedOierFilters.initials === 'string') {
+        processedOierFilters.initials = stringToArray(processedOierFilters.initials);
+    }
+    if (processedOierFilters.gender) {
+        processedOierFilters.gender = Number(processedOierFilters.gender);
+    }
+
+    const payload = {
+      record_filters: processedRecordFilters,
+      oier_filters: processedOierFilters,
+      limit: Number(limit) || 10
+    };
+
+    try {
+      const data = await searchOiers(payload, adminSecret);
+      setResults(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- [新增] 从洛谷查询转换到 UI Builder 的函数 ---
+  const handleLuoguQueryImport = (queryPayload) => {
+    setRecordFilters(queryPayload.record_filters || [{}]);
+    setOierFilters(queryPayload.oier_filters || {});
+    setActiveTab(TABS.BUILDER);
+    // 可选：立即执行搜索
+    // handleSearch(queryPayload.record_filters || [{}], queryPayload.oier_filters || {});
+  };
 
   const renderTabContent = () => {
-    const props = { adminSecret, limit };
+    const commonProps = { adminSecret, limit };
     switch (activeTab) {
       case TABS.LUOGU:
-        return <LuoguQuery {...props} />;
+        return <LuoguQuery {...commonProps} onImportQuery={handleLuoguQueryImport} />;
       case TABS.JSON:
-        return <JsonQuery {...props} />;
+        return (
+            <JsonQuery
+                {...commonProps}
+                recordFilters={recordFilters}
+                oierFilters={oierFilters}
+                onFiltersChange={(newRecords, newOier) => {
+                    setRecordFilters(newRecords);
+                    setOierFilters(newOier);
+                }}
+                onSearch={(records, oier) => handleSearch(records, oier)}
+            />
+        );
       case TABS.BUILDER:
       default:
-        return <QueryBuilder {...props} />;
+        return (
+            <QueryBuilder 
+                {...commonProps}
+                recordFilters={recordFilters}
+                oierFilters={oierFilters}
+                onRecordFiltersChange={setRecordFilters}
+                onOierFiltersChange={setOierFilters}
+                onSearch={(records, oier) => handleSearch(records, oier)}
+            />
+        );
     }
   };
 
@@ -106,8 +195,10 @@ function App() {
               ))}
             </div>
           </div>
-          <div>
+          <div className="space-y-6">
             {renderTabContent()}
+            {/* [修改] 结果展示区移到 App 级别，成为所有 Tab 共享的组件 */}
+            <ResultsDisplay results={results} error={error} loading={loading} />
           </div>
         </main>
       </div>
