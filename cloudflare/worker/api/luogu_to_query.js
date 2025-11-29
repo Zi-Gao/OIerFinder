@@ -133,11 +133,29 @@ async function updateD1PrizesIncremental(db, uid, finalMergedPrizes, originalD1P
 // --- 数据获取与协调 ---
 
 async function fetchAndProcessLuoguPrizes(uid) {
-  const luoguApiUrl = `https://www.luogu.com.cn/offlinePrize/getList/${uid}`;
-  const response = await fetch(luoguApiUrl, { headers: { "User-Agent": "OIerFinder-Worker/1.0" } });
-  if (!response.ok) throw new Error(`Failed to fetch from Luogu API, status: ${response.status}`);
-  const luoguData = await response.json();
-  if (!luoguData || !Array.isArray(luoguData.prizes)) throw new Error("Invalid data structure from Luogu API");
+  const luoguUserPageUrl = `https://www.luogu.com.cn/user/${uid}`;
+  const response = await fetch(luoguUserPageUrl, { headers: { "User-Agent": "OIerFinder-Worker/1.0" } });
+  if (!response.ok) throw new Error(`Failed to fetch from Luogu user page, status: ${response.status}`);
+  
+  const html = await response.text();
+  
+  const scriptRegex = /<script id="lentille-context" type="application\/json">([\s\S]*?)<\/script>/;
+  const match = html.match(scriptRegex);
+  
+  if (!match || !match[1]) {
+    // 如果找不到 script 标签，就认为用户没有奖项
+    return [];
+  }
+  
+  const jsonData = JSON.parse(match[1]);
+  
+  const luoguData = jsonData.data;
+
+  if (!luoguData || !Array.isArray(luoguData.prizes)) {
+    // 如果数据结构不符合预期，也认为没有奖项
+    return [];
+  }
+  
   return luoguData.prizes.map(({ prize }) => {
     if (!prize) return null;
     return {
