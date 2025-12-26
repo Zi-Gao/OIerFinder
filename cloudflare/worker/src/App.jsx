@@ -72,9 +72,9 @@ function App() {
     if (processedOierFilters.initials && typeof processedOierFilters.initials === 'string') {
         processedOierFilters.initials = stringToArray(processedOierFilters.initials);
     }
-    if (processedOierFilters.gender) {
-        processedOierFilters.gender = Number(processedOierFilters.gender);
-    }
+    // if (processedOierFilters.gender) {
+    //     processedOierFilters.gender = Number(processedOierFilters.gender);
+    // }
 
     const payload = {
       record_filters: processedRecordFilters,

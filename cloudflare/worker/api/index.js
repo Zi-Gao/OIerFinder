@@ -1,5 +1,5 @@
 // oier-finder/api/index.js
-
+// Force reload: 1
 import { Hono } from 'hono';
 import { serveStatic } from 'hono/cloudflare-workers';
 import queryOierHandler from './query_oier.js';

@@ -74,14 +74,18 @@ function validateAndSanitizeFilter(filter, allowedKeys) {
             // 字符串数组
             case 'levels': case 'provinces': case 'contest_types': case 'genders': case 'initials':
                 const strArray = toArray(rawValue);
-                if (strArray.some(s => typeof s !== 'string' || s.trim().length === 0)) throw new Error(`All items in '${key}' must be non-empty strings.`);
-                sanitized[key] = strArray.map(s => s.trim());
+                if (strArray.some(s => (typeof s !== 'string' && typeof s !== 'number') || String(s).trim().length === 0)) throw new Error(`All items in '${key}' must be non-empty strings or numbers.`);
+                sanitized[key] = strArray.map(s => String(s).trim());
                 break;
             // 兼容性字段 (gender -> genders)
             case 'gender':
-                if (typeof rawValue !== 'string' || rawValue.trim().length === 0) throw new Error(`'${key}' must be a non-empty string.`);
-                 // 统一转换为复数形式
-                sanitized['genders'] = [rawValue.trim()];
+                let gVal = rawValue;
+                if (gVal !== null && gVal !== undefined) {
+                     const gStr = String(gVal).trim();
+                     if (gStr.length > 0) {
+                        sanitized['genders'] = [gStr];
+                     }
+                }
                 break;
             default:
                 sanitized[key] = rawValue; // 对于未明确处理但允许的键，直接赋值
