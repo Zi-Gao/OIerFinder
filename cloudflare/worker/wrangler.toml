@@ -2,6 +2,16 @@ name = "oier-finder"
 main = "api/index.js"
 compatibility_date = "2025-09-20"
 
+[[routes]]
+pattern = "of.zigao.ac"
+custom_domain = true
+
+[[routes]]
+pattern = "oftest.zigao.ac"
+custom_domain = true
+
+
+
 [assets]
 binding = "ASSETS"
 not_found_handling = "single-page-application"
