@@ -1,18 +1,26 @@
-// src/components/QueryBuilder.jsx
 import React, { useState } from 'react';
 import RecordFilter from './RecordFilter';
-
-// --- Reusable, styled form components ---
-const Input = ({ ...props }) => <input className="w-full bg-gray-700 text-white p-2 border border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none" {...props} />;
-const Select = ({ children, ...props }) => <select className="w-full bg-gray-700 text-white p-2 border border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none" {...props}>{children}</select>;
-const Label = ({ children }) => <label className="block text-sm text-gray-400 mb-1">{children}</label>;
+import BannerCard from './BannerCard';
+import ActionBar from './ActionBar';
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from "@/components/ui/select";
+import { PlusCircle, Search, Settings2, User, Trophy } from "lucide-react";
 
 function QueryBuilder({ 
     recordFilters, 
     oierFilters, 
     onRecordFiltersChange, 
     onOierFiltersChange, 
-    onSearch 
+    onSearch,
+    loading
 }) {
   const [showAdvancedOier, setShowAdvancedOier] = useState(false);
 
@@ -23,16 +31,9 @@ function QueryBuilder({
     newFilters[index] = newFilter;
     onRecordFiltersChange(newFilters);
   };
-  const handleOierFilterChange = (e) => {
-    const { name, value } = e.target;
+  
+  const handleOierFilterChange = (name, value) => {
     onOierFiltersChange(prev => ({ ...prev, [name]: value }));
-  };
-  const toggleAdvancedOier = () => {
-    if (showAdvancedOier) {
-      const { gender, enroll_min, enroll_max, ...basicFilters } = oierFilters;
-      onOierFiltersChange(basicFilters);
-    }
-    setShowAdvancedOier(!showAdvancedOier);
   };
 
   const handleLocalSearch = () => {
@@ -40,12 +41,24 @@ function QueryBuilder({
   };
 
   return (
-    <div className="bg-gray-800 rounded-lg shadow-xl p-6 space-y-6">
-      <div>
-        <h3 className="text-xl font-semibold text-gray-200 border-b border-gray-600 pb-2 mb-4">
-          Record Conditions
-          <span className="text-sm font-normal text-gray-400"> (OIer must satisfy ALL of these)</span>
-        </h3>
+    <div className="space-y-4 animate-fade-in">
+      {/* Record Conditions Card */}
+      <BannerCard
+        icon={Trophy}
+        title="Record Conditions"
+        description="OIer must satisfy ALL award records listed below."
+        action={
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={addFilter}
+            className="h-8 gap-1.5 text-xs bg-background shadow-sm hover:shadow-md transition-all border-muted/50 font-bold"
+          >
+            <PlusCircle className="size-3.5" />
+            Add Record
+          </Button>
+        }
+      >
         <div className="space-y-4">
           {recordFilters.map((filter, index) => (
             <RecordFilter
@@ -55,60 +68,96 @@ function QueryBuilder({
               onRemove={() => removeFilter(index)}
             />
           ))}
+          {recordFilters.length === 0 && (
+            <div className="border border-dashed border-muted-foreground/30 rounded-xl py-12 flex flex-col items-center justify-center bg-muted/5">
+              <p className="text-xs text-muted-foreground mb-3 font-semibold uppercase tracking-wider opacity-60">No records added</p>
+              <Button variant="outline" size="sm" onClick={addFilter} className="h-8 text-xs gap-1.5 shadow-sm border-muted/50">
+                <PlusCircle className="size-3.5" />
+                Add First Condition
+              </Button>
+            </div>
+          )}
         </div>
-        <button onClick={addFilter} className="mt-4 bg-green-600/50 hover:bg-green-600/80 text-green-200 font-bold py-2 px-4 rounded-md transition-colors text-sm">
-          + Add Record Condition
-        </button>
-      </div>
+      </BannerCard>
 
-      <div>
-        <h3 className="text-xl font-semibold text-gray-200 border-b border-gray-600 pb-2 mb-4">OIer Conditions</h3>
-        <div className="bg-gray-700/50 p-4 rounded-lg border border-gray-600 space-y-4">
-            <div>
-                <Label>Initials (comma-separated)</Label>
-                <Input
-                    type="text"
-                    name="initials"
-                    placeholder="e.g., QZH, DMY"
-                    value={oierFilters.initials || ''}
-                    onChange={handleOierFilterChange}
-                />
-            </div>
-            <div className="border-t border-gray-600/50 pt-3">
-              <button onClick={toggleAdvancedOier} className="text-blue-400 hover:text-blue-300 text-sm font-medium">
-                {showAdvancedOier ? 'Hide Advanced Options ▲' : 'Show Advanced Options ▼'}
-              </button>
-            </div>
-            {showAdvancedOier && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 border-t border-gray-600/50 pt-4 animate-fade-in">
-                  <div>
-                      <Label>Gender</Label>
-                      <Select name="gender" value={oierFilters.gender || ''} onChange={handleOierFilterChange}>
-                          <option value="">Any</option>
-                          <option value="1">Male</option>
-                          <option value="-1">Female</option>
-                      </Select>
-                  </div>
-                  <div className="sm:col-span-2">
-                      <Label>Enrollment Year Range (Start - End)</Label>
-                      <div className="flex items-center gap-2">
-                          <Input type="number" name="enroll_min" placeholder="Start Year" value={oierFilters.enroll_min || ''} onChange={handleOierFilterChange}/>
-                          <span>-</span>
-                          <Input type="number" name="enroll_max" placeholder="End Year" value={oierFilters.enroll_max || ''} onChange={handleOierFilterChange}/>
-                      </div>
-                  </div>
+      {/* OIer Conditions Card */}
+      <BannerCard
+        icon={User}
+        title="OIer Conditions"
+        description="Filter by programmer initials, gender, and enrollment."
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-2">
+            <Label htmlFor="initials" className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80">Initials</Label>
+            <Input
+              id="initials"
+              placeholder="e.g., QZH, DMY"
+              value={oierFilters.initials || ''}
+              onChange={(e) => handleOierFilterChange('initials', e.target.value)}
+              className="bg-muted/5 h-10 border-muted/40 text-sm shadow-sm"
+            />
+          </div>
+          <div className="flex items-end">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => setShowAdvancedOier(!showAdvancedOier)}
+              className="h-10 text-primary hover:text-primary hover:bg-primary/5 gap-1.5 text-xs font-bold uppercase tracking-widest"
+            >
+              <Settings2 className="size-3.5" />
+              {showAdvancedOier ? 'Hide Advanced' : 'Show Advanced'}
+            </Button>
+          </div>
+
+          {showAdvancedOier && (
+            <div className="col-span-full grid grid-cols-1 sm:grid-cols-3 gap-5 pt-4 border-t border-muted/20 animate-fade-in">
+              <div className="space-y-2">
+                <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80">Gender</Label>
+                <Select 
+                  value={oierFilters.gender || 'any'} 
+                  onValueChange={(val) => handleOierFilterChange('gender', val === 'any' ? '' : val)}
+                >
+                  <SelectTrigger className="bg-muted/10 h-10 border-muted/40 text-sm shadow-sm">
+                    <SelectValue placeholder="Any" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="any">Any</SelectItem>
+                    <SelectItem value="1">Male</SelectItem>
+                    <SelectItem value="-1">Female</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-            )}
+              <div className="sm:col-span-2 space-y-2">
+                <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80">Enrollment Year</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <Input 
+                    type="number" 
+                    placeholder="From" 
+                    value={oierFilters.enroll_min || ''} 
+                    onChange={(e) => handleOierFilterChange('enroll_min', e.target.value)}
+                    className="bg-muted/5 h-10 border-muted/40 text-sm shadow-sm"
+                  />
+                  <Input 
+                    type="number" 
+                    placeholder="To" 
+                    value={oierFilters.enroll_max || ''} 
+                    onChange={(e) => handleOierFilterChange('enroll_max', e.target.value)}
+                    className="bg-muted/5 h-10 border-muted/40 text-sm shadow-sm"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-      </div>
+      </BannerCard>
 
-      <div className="flex items-center justify-end gap-4 pt-4 border-t border-gray-700">
-        <button onClick={handleLocalSearch} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-md transition-colors">
-          Search
-        </button>
-      </div>
-      
-      {/* ResultsDisplay has been moved to App.jsx */}
+      {/* Action Footer */}
+      <ActionBar 
+        onClick={handleLocalSearch} 
+        loading={loading} 
+        label="Execute Search"
+        className="mt-2"
+      />
     </div>
   );
 }

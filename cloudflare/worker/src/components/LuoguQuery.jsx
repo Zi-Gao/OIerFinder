@@ -1,8 +1,24 @@
-// src/components/LuoguQuery.jsx
 import React, { useState } from 'react';
 import { getLuoguPrizes, getQueryFromJson } from '../api/client';
+import BannerCard from './BannerCard';
+import ActionBar from './ActionBar';
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableHead, 
+  TableHeader, 
+  TableRow 
+} from "@/components/ui/table";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Search, Import, AlertCircle, UserSearch, Download } from "lucide-react";
+import { toast } from "sonner";
 
-// 接收 onImportQuery 回调函数
 function LuoguQuery({ adminSecret, onImportQuery }) {
   const [uid, setUid] = useState('');
   const [prizes, setPrizes] = useState(null);
@@ -11,7 +27,7 @@ function LuoguQuery({ adminSecret, onImportQuery }) {
 
   const handleFetchPrizes = async () => {
     if (!uid) {
-      setError('Please enter a Luogu UID.');
+      toast.error('Please enter a Luogu UID.');
       return;
     }
     setLoading({ ...loading, prizes: true });
@@ -20,83 +36,128 @@ function LuoguQuery({ adminSecret, onImportQuery }) {
     try {
       const data = await getLuoguPrizes(uid, adminSecret);
       setPrizes(data);
-    } catch (err) { // <<< CORRECTED SYNTAX HERE
+      toast.success(`Fetched ${data.length} awards from Luogu.`);
+    } catch (err) {
       setError(err.message);
+      toast.error("Failed to fetch awards.");
     } finally {
       setLoading({ ...loading, prizes: false });
     }
   };
 
-  // [修改] 这个函数现在不执行搜索，而是导入配置
   const handleImport = async () => {
     setLoading({ ...loading, import: true });
     setError('');
     try {
       const queryPayload = await getQueryFromJson(uid, adminSecret);
-      onImportQuery(queryPayload); // 调用 App 传来的函数
-    } catch (err) { // <<< AND CORRECTED SYNTAX HERE
+      onImportQuery(queryPayload);
+    } catch (err) {
       setError(err.message);
+      toast.error("Failed to import query.");
     } finally {
       setLoading({ ...loading, import: false });
     }
   };
 
   return (
-    <div className="bg-gray-800 rounded-lg shadow-xl p-6 space-y-6">
-      <div>
-        <label htmlFor="luogu-uid" className="block text-gray-300 mb-2">Enter Luogu User ID:</label>
-        <div className="flex gap-4">
-          <input
-            id="luogu-uid"
-            type="text"
-            value={uid}
-            onChange={(e) => setUid(e.target.value)}
-            placeholder="e.g., 2"
-            className="flex-grow bg-gray-700 text-white p-2 border border-gray-600 rounded-md"
-          />
-          <button onClick={handleFetchPrizes} disabled={loading.prizes} className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-500">
-            {loading.prizes ? 'Fetching...' : 'Fetch Awards'}
-          </button>
-        </div>
-      </div>
-      
-      {/* 显示错误信息 */}
-      {error && (
-        <div className="p-4 bg-red-900 border border-red-700 text-red-200 rounded-lg">
-          <p className="font-bold">An Error Occurred</p>
-          <p className="text-sm">{error}</p>
-        </div>
-      )}
+    <div className="space-y-6 animate-fade-in">
+      <BannerCard
+        icon={UserSearch}
+        title="Luogu UID Import"
+        description="Fetch user awards from Luogu and generate a query payload automatically."
+      >
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row gap-4 items-end">
+            <div className="flex-grow space-y-2">
+              <Label htmlFor="luogu-uid" className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 ml-1">Luogu User ID</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-3 size-4 text-muted-foreground opacity-50" />
+                <Input
+                  id="luogu-uid"
+                  type="text"
+                  value={uid}
+                  onChange={(e) => setUid(e.target.value)}
+                  placeholder="e.g., 2"
+                  className="pl-10 bg-muted/5 h-10 border-muted/40 text-sm shadow-sm"
+                />
+              </div>
+            </div>
 
-      {prizes && (
-        <div className="bg-gray-700 p-4 rounded-lg">
-          <h3 className="text-lg font-semibold mb-2">Awards Found ({prizes.length})</h3>
-          <div className="max-h-60 overflow-y-auto text-sm border border-gray-600 rounded-md">
-            <table className="w-full text-left">
-              <thead className="sticky top-0 bg-gray-800">
-                <tr>
-                  <th className="p-2">Year</th>
-                  <th className="p-2">Contest</th>
-                  <th className="p-2">Prize</th>
-                </tr>
-              </thead>
-              <tbody>
-                {prizes.map((p, i) => (
-                  <tr key={i} className="border-t border-gray-600">
-                    <td className="p-2">{p.year || 'N/A'}</td>
-                    <td className="p-2">{p.contest_name}</td>
-                    <td className="p-2">{p.prize_level}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <ActionBar 
+              onClick={handleFetchPrizes} 
+              loading={loading.prizes} 
+              label="Fetch Awards" 
+              icon={Download}
+              className="pt-0 flex-shrink-0"
+            />
           </div>
-          <button onClick={handleImport} disabled={loading.import} className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-500">
-            {loading.import ? 'Importing...' : 'Import to UI Builder'}
-          </button>
+
+          {error && (
+            <Alert variant="destructive" className="bg-destructive/5 border-destructive/20 text-destructive rounded-xl">
+              <AlertCircle className="size-4" />
+              <AlertTitle className="font-bold">Error</AlertTitle>
+              <AlertDescription className="text-xs">{error}</AlertDescription>
+            </Alert>
+          )}
+
+          {prizes && (
+            <div className="border border-muted/40 rounded-2xl overflow-hidden shadow-sm bg-background">
+              <div className="bg-muted/30 border-b border-muted/30 py-3 px-6 flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/80">
+                  Awards Records List
+                </span>
+                <Badge variant="outline" className="bg-background text-primary border-muted/50 font-bold text-[9px] px-2.5">
+                  {prizes.length} ITEMS
+                </Badge>
+              </div>
+              
+              <div className="max-h-[300px] overflow-y-auto">
+                <Table>
+                  <TableHeader className="bg-muted/10 sticky top-0 z-10">
+                    <TableRow className="hover:bg-transparent border-muted/30">
+                      <TableHead className="w-[100px] px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">Year</TableHead>
+                      <TableHead className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">Contest</TableHead>
+                      <TableHead className="px-6 py-3 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">Prize</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {prizes.map((p, i) => (
+                      <TableRow key={i} className="hover:bg-primary/5 transition-colors border-muted/20">
+                        <TableCell className="px-6 py-3 font-medium text-xs text-muted-foreground">{p.year || 'N/A'}</TableCell>
+                        <TableCell className="px-6 py-3 font-bold text-foreground text-sm">{p.contest_name}</TableCell>
+                        <TableCell className="px-6 py-3">
+                          {p.is_noi_series ? (
+                            <Badge variant="secondary" className="bg-primary/10 text-primary border-none font-bold text-[10px] px-2 py-0 h-5">
+                              {p.prize_level}
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">{p.prize_level}</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="p-4 bg-muted/10 border-t border-muted/30">
+                <Button 
+                  onClick={handleImport} 
+                  disabled={loading.import} 
+                  variant="secondary"
+                  className="w-full h-10 gap-2 shadow-sm border border-muted/40 font-black uppercase text-[10px] tracking-widest bg-background hover:bg-muted/50"
+                >
+                  {loading.import ? (
+                    <span className="size-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                  ) : (
+                    <Import className="size-4" />
+                  )}
+                  Import Selection to Query Builder
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
-      )}
-      {/* ResultsDisplay has been moved to App.jsx */}
+      </BannerCard>
     </div>
   );
 }
