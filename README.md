@@ -1,60 +1,108 @@
-# OIer Finder
+# OIerFinder
 
-数据/代码来自 [OIerDb-ng/OIerDb-data-generator](https://github.com/OIerDb-ng/OIerDb-data-generator)，通过提取 [OIerDb-ng/OIerDb-data-generator](https://github.com/OIerDb-ng/OIerDb-data-generator) 生成的数据放入 sqlite 之后实现 oier 筛选查询。
+OIerFinder 是一个基于 [OIerDb-ng](https://github.com/OIerDb-ng/OIerDb-data-generator) 数据源的选手信息查询与筛选工具。本项目提供了一套完整的流水线，涵盖了从原始数据同步、本地数据库构建、多维度筛选引擎到云端（Cloudflare）部署的全过程。
 
-## 使用
+## 核心功能
 
-安装依赖
+- **多维筛选引擎**：支持基于 YAML 配置的复合条件查询，能够根据姓名、性别、年级、省份、获奖等级、分数排名及 DB 评分进行精准筛选。
+- **关联记录匹配**：支持跨比赛筛选，例如“寻找在 2023 年获得过 NOI 金牌且在 2021 年获得过 NOIP 一等奖的选手”。
+- **本地 Web 界面**：基于 Flask 的交互式查询页面，提供直观的搜索体验。
+- **洛谷（Luogu）集成**：
+    - 支持爬取洛谷奖项认证数据。
+    - 提供转换工具，可将洛谷网页复制的奖项文本一键生成查询配置文件。
+- **数据统计分析**：内置脚本可生成比赛统计 JSON，支持可视化展示参赛趋势与省份分布。
+- **云原生部署**：完整的 Cloudflare Workers + D1 数据库部署方案，前端采用 React + Vite + Shadcn UI 构建。
+
+## 快速开始
+
+### 1. 环境准备
+
+确保已安装 Python 3.10+，并执行以下命令初始化项目：
 
 ```bash
+# 克隆项目及子仓库
+git clone --recursive https://github.com/your-repo/OIerFinder.git
+cd OIerFinder
+
+# 安装依赖
 pip install -r requirements.txt
 ```
 
-### web page
+### 2. 数据处理流水线
 
-直接运行 web 查询页面
+本项目的数据依赖于 `oierdb-data` 子项目，需手动触发数据生成流程：
 
+1. **生成原始数据**：
+   ```bash
+   cd oierdb-data
+   python main.py
+   cd ..
+   ```
+2. **构建 SQLite 数据库**：
+   ```bash
+   python create_db.py
+   ```
+   该操作会读取 `oierdb-data/dist` 下的 JSON 与文本数据，生成本地数据库 `oier_data.db`。
+
+---
+
+## 使用指南
+
+### 1. 本地 Web 查询
+启动 Flask 服务器以开启可视化搜索界面：
 ```bash
 python app.py
 ```
+默认访问地址：`http://127.0.0.1:5000`
 
-然后访问 `http://127.0.0.1:5000/`
-
-### oierfinder
-
-用于筛选出 OIer。
-
+### 2. 命令行查询 (CLI)
+通过编写 YAML 配置文件进行复杂逻辑筛选：
 ```bash
 python oierfinder.py -c sample_config.yml
 ```
+配置文件支持设置入学年份区间、年级范围以及多组独立的记录过滤条件。
 
-### luogu2yml
+### 3. 洛谷工具集
+- **奖项认证转换**：将洛谷个人主页的奖项认证文本存入 `awards.txt`，运行以下命令生成配置：
+  ```bash
+  python luogu2yml.py -i awards.txt -o config.yml
+  ```
+- **Top 1000 爬取**：
+  ```bash
+  python luogu_top1000.py
+  ```
 
+---
 
-用于将洛谷的的奖项认证格式化为 `conditions.yaml` 格式，直接从洛谷网页上复制奖项认证的文本，例如 `sample_lgawards.txt`：
+## 云端部署 (Cloudflare Stack)
 
-```bash
-python format_lgawards.py -i sample_lgawards.txt -o config.yml
-```
+项目支持在 Cloudflare 生态中部署高性能的公共查询服务，相关代码位于 `cloudflare/` 目录下：
 
-### 更新数据
+- **Worker API**: 处理 D1 数据库查询逻辑（`cloudflare/worker/api`）。
+- **D1 Database**: 存储结构化选手数据。
+- **Frontend**: 基于 React 的现代化单页应用（`cloudflare/worker/src`）。
 
-如需更新最新的数据，首先更新 [OIerDb-ng/OIerDb-data-generator](https://github.com/OIerDb-ng/OIerDb-data-generator) 子仓库：
+### 部署流程简述：
+1. **自动化一键部署**：
+   项目提供 `update_cloudflare.py` 脚本，可一键完成子仓库更新、数据生成、统计计算、D1 同步及 Worker 部署：
+   ```bash
+   python update_cloudflare.py
+   ```
+2. **手动分步部署**：
+   - **生成统计 JSON**：
+     ```bash
+     python calculate_stats.py --db oier_data.db --output cloudflare/worker/api/contest_stats.json
+     ```
+   - **数据同步**：使用 `cloudflare/script/upload_to_d1.py` 将本地数据库上传至 Cloudflare D1。
+   - **发布应用**：
+     ```bash
+     cd cloudflare/worker
+     npm run deploy
+     ```
 
-```bash
-git submodule update --init --recursive
-```
+## 数据声明与致谢
 
-然后生成 [OIerDb-ng/OIerDb-data-generator](https://github.com/OIerDb-ng/OIerDb-data-generator) 的数据：
+- **数据来源**：本项目核心数据源自 [OIerDb-ng/OIerDb-data-generator](https://github.com/OIerDb-ng/OIerDb-data-generator)。
+- **隐私提醒**：选手信息仅供个人学习与学术研究使用，请务必遵守相关法律法规，尊重选手的个人隐私。
 
-```bash
-cd oierdb-data
-python main.py
-```
-
-最后通过从 oierdb-data/dist 中提取数据：
-
-```
-cd ..
-python create_db.py
-```
+---

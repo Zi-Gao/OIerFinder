@@ -9,9 +9,11 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
-import { LayoutGrid, Braces, UserCircle, Search, Zap, Code2, ExternalLink, Cloud } from "lucide-react";
+import { useTheme } from "next-themes";
+import { LayoutGrid, Braces, UserCircle, Search, Zap, Code2, ExternalLink, Cloud, Moon, Sun } from "lucide-react";
 import logo from './logo.svg';
 
 const TABS = {
@@ -34,7 +36,9 @@ const cleanObject = (obj) => {
 
 function App() {
   const [activeTab, setActiveTab] = useState(TABS.BUILDER);
-  
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
   // --- 共享的查询状态 ---
   const [recordFilters, setRecordFilters] = useState([{}]);
   const [oierFilters, setOierFilters] = useState({});
@@ -47,6 +51,10 @@ function App() {
   // --- 全局设置状态 ---
   const [adminSecret, setAdminSecret] = useState(() => localStorage.getItem('oierFinderAdminSecret') || '');
   const [limit, setLimit] = useState(() => parseInt(localStorage.getItem('oierFinderLimit'), 10) || 10);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('oierFinderAdminSecret', adminSecret);
@@ -113,7 +121,7 @@ function App() {
   return (
     <div className="min-h-screen bg-background font-sans antialiased selection:bg-primary/10 text-foreground relative overflow-hidden flex flex-col">
       {/* Balanced Background Accent */}
-      <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:20px_20px] pointer-events-none opacity-50" />
+      <div className="absolute inset-0 bg-[radial-gradient(var(--border)_1px,transparent_1px)] [background-size:20px_20px] pointer-events-none opacity-50" />
 
       <div className="container mx-auto py-16 px-4 md:px-8 max-w-7xl relative z-10 flex-grow">
         <header className="flex flex-col items-center mb-16 animate-fade-in">
@@ -122,7 +130,7 @@ function App() {
               <img src={logo} alt="OIerFinder Logo" className="w-full h-full shadow-2xl rounded-2xl border border-slate-200/50" />
             </div>
             <div className="flex flex-col">
-              <h1 className="text-5xl md:text-6xl font-black tracking-tighter text-slate-950">
+              <h1 className="text-5xl md:text-6xl font-black tracking-tighter text-slate-950 dark:text-slate-50">
                 OIer<span className="text-primary italic">Finder</span>
               </h1>
             </div>
@@ -159,6 +167,22 @@ function App() {
                     className="bg-muted/5 border-muted/40 h-10 shadow-sm focus:bg-background transition-colors"
                   />
                 </div>
+                {mounted && (
+                  <div className="flex items-center justify-between pt-2 border-t border-muted/20">
+                    <div className="flex flex-col gap-1">
+                      <Label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/60 ml-1">Dark Mode</Label>
+                      <span className="text-[10px] text-muted-foreground/40 ml-1">Toggle theme preference</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Sun className="size-3 text-muted-foreground/60" />
+                      <Switch 
+                        checked={theme === 'dark'} 
+                        onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')} 
+                      />
+                      <Moon className="size-3 text-muted-foreground/60" />
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </aside>
@@ -236,12 +260,12 @@ function App() {
                 <div className="size-8 relative group-hover:rotate-6 transition-transform">
                   <img src={logo} alt="OIerFinder Logo" className="w-full h-full shadow-lg rounded-md border border-slate-200/50" />
                 </div>
-                <span className="text-lg font-black tracking-tighter text-slate-950">
+                <span className="text-lg font-black tracking-tighter text-slate-950 dark:text-slate-50">
                   OIer<span className="text-primary italic">Finder</span>
                 </span>
               </div>
               <div className="flex flex-col gap-2 max-w-md">
-                <p className="text-[11px] text-slate-600 font-bold uppercase tracking-widest flex items-center gap-2">
+                <p className="text-[11px] text-slate-600 dark:text-slate-400 font-bold uppercase tracking-widest flex items-center gap-2">
                   <span className="size-1.5 rounded-full bg-primary" />
                   Professional Search Infrastructure
                 </p>
@@ -253,7 +277,7 @@ function App() {
             
             <div className="grid grid-cols-2 gap-x-12 gap-y-6 w-full md:w-auto">
               <div className="flex flex-col gap-3">
-                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Resources</span>
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Resources</span>
                 <a 
                   href="https://github.com/zigao-official/OIerFinder" 
                   target="_blank" 
@@ -265,7 +289,7 @@ function App() {
                 </a>
               </div>
               <div className="flex flex-col gap-3">
-                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Data Source</span>
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Data Source</span>
                 <a 
                   href="https://oier.baoshuo.dev/" 
                   target="_blank" 
@@ -284,7 +308,7 @@ function App() {
               © {new Date().getFullYear()} OIerFinder Engine. No rights reserved.
             </p>
             <div className="flex items-center gap-6">
-               <span className="text-[9px] font-black uppercase tracking-widest text-blue-600 flex items-center gap-1.5 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-100 shadow-sm">
+               <span className="text-[9px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-400 flex items-center gap-1.5 bg-blue-50 dark:bg-blue-950/30 px-2.5 py-1 rounded-md border border-blue-100 dark:border-blue-900/50 shadow-sm">
                  <Cloud className="size-3" />
                  Build: CF-PROD-2026.05
                </span>
