@@ -174,12 +174,17 @@ async function fetchD1Prizes(db, uid) {
 export async function getPrizes(uid, sync, env, ctx) {
     const originalD1Prizes = await fetchD1Prizes(env.DB, uid);
     if (sync) {
-        const luoguPrizes = await fetchAndProcessLuoguPrizes(uid);
-        const finalMergedPrizes = mergePrizes(luoguPrizes, originalD1Prizes);
-        ctx.waitUntil(updateD1PrizesIncremental(env.DB, uid, finalMergedPrizes, originalD1Prizes));
-        return finalMergedPrizes;
+        try {
+            const luoguPrizes = await fetchAndProcessLuoguPrizes(uid);
+            const finalMergedPrizes = mergePrizes(luoguPrizes, originalD1Prizes);
+            ctx.waitUntil(updateD1PrizesIncremental(env.DB, uid, finalMergedPrizes, originalD1Prizes));
+            return { prizes: finalMergedPrizes, synced: true };
+        } catch (err) {
+            console.error(`Failed to fetch from Luogu for UID ${uid}:`, err);
+            return { prizes: originalD1Prizes, synced: false, error: err.message };
+        }
     }
-    return originalD1Prizes;
+    return { prizes: originalD1Prizes, synced: false };
 }
 
 
@@ -215,10 +220,14 @@ export default async function luoguToQueryHandler(c) {
             return c.json({ error: "Missing 'uid' query parameter" }, 400);
         }
 
-        const prizeList = await getPrizes(uid, sync, c.env, c.executionCtx);
-        const queryPayload = generateQueryPayload(prizeList);
+        const result = await getPrizes(uid, sync, c.env, c.executionCtx);
+        const queryPayload = generateQueryPayload(result.prizes);
         
-        return c.json(queryPayload);
+        return c.json({
+            ...queryPayload,
+            synced: result.synced,
+            sync_error: result.error
+        });
 
     } catch (err) {
         console.error('Error in queryOierHandler:', err);

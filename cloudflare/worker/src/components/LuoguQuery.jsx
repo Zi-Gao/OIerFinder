@@ -35,8 +35,12 @@ function LuoguQuery({ adminSecret, onImportQuery }) {
     setPrizes(null);
     try {
       const data = await getLuoguPrizes(uid, adminSecret);
-      setPrizes(data);
-      toast.success(`Fetched ${data.length} awards from Luogu.`);
+      setPrizes(data.prizes);
+      if (data.synced) {
+        toast.success(`Fetched ${data.prizes.length} awards from Luogu.`);
+      } else {
+        toast.info(`Showing ${data.prizes.length} historical records (Luogu sync failed).`);
+      }
     } catch (err) {
       setError(err.message);
       toast.error("Failed to fetch awards.");
@@ -51,6 +55,9 @@ function LuoguQuery({ adminSecret, onImportQuery }) {
     try {
       const queryPayload = await getQueryFromJson(uid, adminSecret);
       onImportQuery(queryPayload);
+      if (!queryPayload.synced) {
+        toast.info("Imported historical query (Luogu sync failed).");
+      }
     } catch (err) {
       setError(err.message);
       toast.error("Failed to import query.");

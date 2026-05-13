@@ -15,7 +15,8 @@ export default async function getLuoguPrizesHandler(c) {
             return c.json({ error: "Missing 'uid' query parameter" }, 400);
         }
 
-        let prizeList = await getPrizes(uid, sync, c.env, c.executionCtx);
+        const result = await getPrizes(uid, sync, c.env, c.executionCtx);
+        let prizeList = result.prizes;
 
         if (noi_only) {
             prizeList = prizeList.filter(p => p.is_noi_series);
@@ -23,7 +24,11 @@ export default async function getLuoguPrizesHandler(c) {
 
         prizeList.sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || a.contest_name.localeCompare(b.contest_name));
 
-        return c.json(prizeList);
+        return c.json({
+            prizes: prizeList,
+            synced: result.synced,
+            sync_error: result.error
+        });
 
     } catch (err) {
         console.error('Error in queryOierHandler:', err);
