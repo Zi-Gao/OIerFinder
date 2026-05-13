@@ -13,8 +13,9 @@ import { Switch } from "@/components/ui/switch";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
-import { LayoutGrid, Braces, UserCircle, Search, Zap, Code2, ExternalLink, Cloud, Moon, Sun } from "lucide-react";
+import { LayoutGrid, Braces, UserCircle, Search, Zap, Code2, ExternalLink, Cloud, Moon, Sun, Settings2 } from "lucide-react";
 import logo from './logo.svg';
+import BannerCard from './components/BannerCard';
 
 const TABS = {
   BUILDER: 'UI Builder',
@@ -121,13 +122,13 @@ function App() {
   return (
     <div className="min-h-screen bg-background font-sans antialiased selection:bg-primary/10 text-foreground relative overflow-hidden flex flex-col">
       {/* Balanced Background Accent */}
-      <div className="absolute inset-0 bg-[radial-gradient(var(--border)_1px,transparent_1px)] [background-size:20px_20px] pointer-events-none opacity-50" />
+      <div className="absolute inset-0 bg-[radial-gradient(var(--border)_1px,transparent_2px)] [background-size:20px_20px] pointer-events-none opacity-50" />
 
       <div className="container mx-auto py-16 px-4 md:px-8 max-w-7xl relative z-10 flex-grow">
         <header className="flex flex-col items-center mb-16 animate-fade-in">
           <div className="flex items-center gap-6">
             <div className="size-20 relative group transition-transform hover:-rotate-3 duration-300">
-              <img src={logo} alt="OIerFinder Logo" className="w-full h-full shadow-2xl rounded-2xl border border-slate-200/50" />
+              <img src={logo} alt="OIerFinder Logo" className="w-full h-full bg-white shadow-2xl rounded-2xl border border-slate-200/50" />
             </div>
             <div className="flex flex-col">
               <h1 className="text-5xl md:text-6xl font-black tracking-tighter text-slate-950 dark:text-slate-50">
@@ -140,12 +141,12 @@ function App() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
           {/* Sidebar */}
           <aside className="lg:col-span-3 space-y-6">
-            <Card className="shadow-sm border-muted/50 rounded-2xl bg-background">
-              <CardHeader className="pb-4">
-                <CardTitle className="text-lg font-semibold tracking-tight text-foreground">Settings</CardTitle>
-                <CardDescription>Global configuration for search.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
+            <BannerCard
+              icon={Settings2}
+              title="Settings"
+              description="Global configuration for search."
+            >
+              <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="admin-secret" className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/60 ml-1">Admin Secret</Label>
                   <Input
@@ -183,8 +184,8 @@ function App() {
                     </div>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+            </BannerCard>
           </aside>
 
           {/* Main Area */}
@@ -258,7 +259,7 @@ function App() {
             <div className="flex flex-col items-center md:items-start gap-4">
               <div className="flex items-center gap-2.5 group cursor-default">
                 <div className="size-8 relative group-hover:rotate-6 transition-transform">
-                  <img src={logo} alt="OIerFinder Logo" className="w-full h-full shadow-lg rounded-md border border-slate-200/50" />
+                  <img src={logo} alt="OIerFinder Logo" className="w-full h-full bg-white shadow-lg rounded-md border border-slate-200/50" />
                 </div>
                 <span className="text-lg font-black tracking-tighter text-slate-950 dark:text-slate-50">
                   OIer<span className="text-primary italic">Finder</span>
