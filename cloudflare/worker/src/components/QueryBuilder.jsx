@@ -86,23 +86,23 @@ function QueryBuilder({
         title="OIer Conditions"
         description="Filter by programmer initials, gender, and enrollment."
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-2">
-            <Label htmlFor="initials" className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80">Initials</Label>
-            <Input
-              id="initials"
-              placeholder="e.g., QZH, DMY"
-              value={oierFilters.initials || ''}
-              onChange={(e) => handleOierFilterChange('initials', e.target.value)}
-              className="bg-muted/5 h-10 border-muted/40 text-sm shadow-sm"
-            />
-          </div>
-          <div className="flex items-end">
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row gap-4 items-end">
+            <div className="flex-grow space-y-2 w-full">
+              <Label htmlFor="initials" className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 ml-1">Initials</Label>
+              <Input
+                id="initials"
+                placeholder="e.g., QZH, DMY"
+                value={oierFilters.initials || ''}
+                onChange={(e) => handleOierFilterChange('initials', e.target.value)}
+                className="bg-muted/5 h-10 border-muted/40 text-sm shadow-sm"
+              />
+            </div>
             <Button 
               variant="ghost" 
               size="sm" 
               onClick={() => setShowAdvancedOier(!showAdvancedOier)}
-              className="h-10 text-primary hover:text-primary hover:bg-primary/5 gap-1.5 text-xs font-bold uppercase tracking-widest"
+              className="h-10 text-primary hover:text-primary hover:bg-primary/5 gap-1.5 text-xs font-bold uppercase tracking-widest flex-shrink-0"
             >
               <Settings2 className="size-3.5" />
               {showAdvancedOier ? 'Hide Advanced' : 'Show Advanced'}
@@ -110,7 +110,7 @@ function QueryBuilder({
           </div>
 
           {showAdvancedOier && (
-            <div className="col-span-full grid grid-cols-1 sm:grid-cols-3 gap-5 pt-4 border-t border-muted/20 animate-fade-in">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 pt-4 border-t border-muted/20 animate-fade-in">
               <div className="space-y-2">
                 <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80">Gender</Label>
                 <Select 
