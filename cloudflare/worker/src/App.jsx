@@ -16,6 +16,7 @@ import { useTheme } from "next-themes";
 import { LayoutGrid, Braces, UserCircle, Search, Zap, Code2, ExternalLink, Cloud, Moon, Sun, Settings2 } from "lucide-react";
 import logo from './logo.svg';
 import BannerCard from './components/BannerCard';
+import InteractiveBackground from './components/InteractiveBackground';
 
 const TABS = {
   BUILDER: 'UI Builder',
@@ -121,8 +122,8 @@ function App() {
 
   return (
     <div className="min-h-screen bg-background font-sans antialiased selection:bg-primary/10 text-foreground relative overflow-hidden flex flex-col">
-      {/* Balanced Background Accent */}
-      <div className="absolute inset-0 bg-[radial-gradient(var(--border)_1px,transparent_2px)] [background-size:20px_20px] pointer-events-none opacity-50" />
+      {/* Dynamic Interactive Background */}
+      <InteractiveBackground />
 
       <div className="container mx-auto py-16 px-4 md:px-8 max-w-7xl relative z-10 flex-grow">
         <header className="flex flex-col items-center mb-16 animate-fade-in">
@@ -280,7 +281,7 @@ function App() {
               <div className="flex flex-col gap-3">
                 <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Resources</span>
                 <a 
-                  href="https://github.com/zigao-official/OIerFinder" 
+                  href="https://github.com/Zi-Gao/OIerFinder" 
                   target="_blank" 
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 text-xs font-bold text-muted-foreground hover:text-primary transition-colors group"
