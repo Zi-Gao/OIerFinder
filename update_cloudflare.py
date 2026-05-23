@@ -52,9 +52,9 @@ def main():
     print_step("Step 1: Updating oierdb-data submodule")
     run_command(["git", "submodule", "update", "--remote", "--merge"])
     
-    print_step("Step 2: Installing dependencies for oierdb-data")
-    # 根据 README，需要这三个包
-    run_command(["uv", "pip", "install", "pypinyin", "requests", "tqdm"])
+    print_step("Step 2: Installing dependencies")
+    # 需要这些包来处理数据、解析配置以及与 Cloudflare API 交互
+    run_command(["uv", "pip", "install", "pypinyin", "requests", "tqdm", "pyyaml"])
 
     print_step("Step 3: Generating latest data files from submodule")
     run_command([sys.executable, "main.py"], cwd=OIERDB_DATA_DIR)
@@ -68,7 +68,11 @@ def main():
     print_step("Step 6: Uploading all new data to Cloudflare D1")
     run_command([sys.executable, "upload_to_d1.py"], cwd=CLOUDFLARE_SCRIPT_DIR)
 
-    print_step("Step 7: Deploying the Cloudflare Worker")
+    print_step("Step 7: Optimizing Database Indexes")
+    # 建立索引是降低 D1 扫描行数、减少成本的关键
+    run_command([sys.executable, "create_indexes.py"], cwd=CLOUDFLARE_SCRIPT_DIR)
+
+    print_step("Step 8: Deploying the Cloudflare Worker")
     # 确保 npx 在你的系统 PATH 中
     run_command(["npm", "run", "deploy"], cwd=CLOUDFLARE_WORKER_DIR)
 
