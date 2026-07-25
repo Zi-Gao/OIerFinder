@@ -8,6 +8,7 @@
     "build": "vite build",
     "deploy": "vite build && wrangler deploy",
     "lint": "eslint .",
+    "test": "node --test api/*.test.js",
     "preview": "vite preview"
   },
   "dependencies": {

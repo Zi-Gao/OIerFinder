@@ -1,27 +1,18 @@
 // cloudflare/worker/functions/query_oier.js
 // 1. [数据导入] 从外部 JSON 文件导入预计算的统计数据。
 import CONTEST_STATS_DATA from './contest_stats.json';
+import { removeRedundantFilters } from './filter_subset.js';
+import {
+    D1_MAX_VARS,
+    exceedsD1ParameterLimit,
+    getFilterStrength,
+} from './query_policy.js';
+import { buildRecordSubquery, pushInClause, toArray } from './record_query.js';
 // --- 业务逻辑与安全常量 ---
 const { min_year, max_year, stats: CONTEST_STATS } = CONTEST_STATS_DATA;
-const STRENGTH_SCORES = {
-    CONTEST_ID: 10, SCHOOL_ID: 8, OIER_INITIALS: 10,
-    YEAR: 3, PROVINCE: 2,
-    HIGH_PRIORITY_CONTEST: 5,   // 国家级/国际级: NOI, CTSC, APIO, WC
-    MID_PRIORITY_CONTEST: 3,    // 省选级: NOIP提高, NOIP
-    LOW_PRIORITY_CONTEST: 1,    // 普及/入门级: CSP提高, CSP入门, NOIP普及
-    LEVEL: 1, SCORE: 1, RANK: 1,
-};
-const CONTEST_PRIORITY = {
-    'NOI': 1, 'CTSC': 1, 'APIO': 1, 'WC': 1, 'NOID类': 1,
-    'NOIP提高': 2, 'NOIP': 2,
-    'CSP提高': 3,
-    'NOIP普及': 4, 'CSP入门': 4,
-};
 const MINIMUM_QUERY_STRENGTH = 20;
 const MAX_FILTERS_ALLOWED = 20;
 // --- 辅助函数 ---
-function toArray(value) { if (value === undefined || value === null) return []; return Array.isArray(value) ? value.filter(v => v !== undefined && v !== null) : [value]; }
-function pushInClause(targetWhere, targetParams, column, values) { if (!values || values.length === 0) return; if (values.length === 1) { targetWhere.push(`${column} = ?`); targetParams.push(values[0]); } else { const placeholders = values.map(() => '?').join(','); targetWhere.push(`${column} IN (${placeholders})`); targetParams.push(...values); } }
 function formatUsageStep(name, meta) { return { name, rows_read: meta?.rows_read ?? 0, rows_written: meta?.rows_written ?? 0, duration_ms: meta?.duration ?? 0 }; }
 function normalizeLimit(value, fallback = 100) { const num = Number(value); if (!Number.isFinite(num) || num <= 0) return fallback; return Math.min(Math.floor(num), 100); }
 
@@ -58,7 +49,10 @@ function validateAndSanitizeFilter(filter, allowedKeys) {
                 break;
             // 布尔型
             case 'fall_semester':
-                sanitized[key] = Boolean(rawValue);
+                if (typeof rawValue !== 'boolean') {
+                    throw new Error("'fall_semester' must be a boolean.");
+                }
+                sanitized[key] = rawValue;
                 break;
             // 字符串型
             case 'level': case 'province': case 'contest_type':
@@ -69,13 +63,15 @@ function validateAndSanitizeFilter(filter, allowedKeys) {
             case 'years': case 'school_ids': case 'contest_ids':
                 const numArray = toArray(rawValue).map(Number);
                 if (numArray.some(n => !Number.isFinite(n))) throw new Error(`All items in '${key}' must be valid numbers.`);
-                sanitized[key] = numArray;
+                if (numArray.length > 0) sanitized[key] = [...new Set(numArray)];
                 break;
             // 字符串数组
             case 'levels': case 'provinces': case 'contest_types': case 'genders': case 'initials':
                 const strArray = toArray(rawValue);
                 if (strArray.some(s => (typeof s !== 'string' && typeof s !== 'number') || String(s).trim().length === 0)) throw new Error(`All items in '${key}' must be non-empty strings or numbers.`);
-                sanitized[key] = strArray.map(s => String(s).trim());
+                if (strArray.length > 0) {
+                    sanitized[key] = [...new Set(strArray.map(s => String(s).trim()))];
+                }
                 break;
             // 兼容性字段 (gender -> genders)
             case 'gender':
@@ -128,37 +124,6 @@ function validateAndSanitizePayload(payload) {
 }
 
 // --- 过滤器处理与排序函数 ---
-function isSubset(filterA, filterB) {
-    const check = (keyA, keyB) => {
-        const valA = toArray(filterA[keyA] ?? filterA[keyB]);
-        const valB = toArray(filterB[keyA] ?? filterB[keyB]);
-        if (valA.length === 0) return true;
-        if (valB.length === 0) return false;
-        return valA.every(v => valB.includes(v));
-    };
-    const checkRange = (minKey, maxKey) => {
-        const minA = filterA[minKey], maxA = filterA[maxKey];
-        const minB = filterB[minKey], maxB = filterB[maxKey];
-        if (minA !== undefined && (minB === undefined || minA < minB)) return false;
-        if (maxA !== undefined && (maxB === undefined || maxA > maxB)) return false;
-        return true;
-    };
-    const checkYears = () => {
-        const yearsA = toArray(filterA.years);
-        const yearsB = toArray(filterB.years);
-        if (yearsA.length > 0) {
-            if (yearsB.length > 0) return yearsA.every(y => yearsB.includes(y));
-            return yearsA.every(y => y >= filterB.year_start && y <= filterB.year_end);
-        }
-        return true;
-    };
-    return check('level', 'levels') && check('province', 'provinces') &&
-           check('school_id', 'school_ids') && check('contest_id', 'contest_ids') &&
-           check('contest_type', 'contest_types') &&
-           checkYears() &&
-           (toArray(filterA.years).length > 0 ? true : checkRange('year_start', 'year_end')) &&
-           checkRange('min_score', 'max_score') && checkRange('min_rank', 'max_rank');
-}
 function getFilterSelectivity(filter) {
     if (filter.contest_id || filter.school_id) return 1;
     let years;
@@ -189,29 +154,6 @@ function getFilterSelectivity(filter) {
     }
     return estimatedCount > 0 ? estimatedCount : 1;
 }
-function getFilterStrength(filter, isOierFilter = false) {
-    let score = 0;
-    if (isOierFilter) {
-        if (filter.initials) score += STRENGTH_SCORES.OIER_INITIALS;
-        if (filter.enroll_min || filter.enroll_max) score += 1;
-        return score;
-    }
-    if (filter.contest_id || filter.contest_ids) score += STRENGTH_SCORES.CONTEST_ID;
-    if (filter.school_id || filter.school_ids) score += STRENGTH_SCORES.SCHOOL_ID;
-    if (filter.years || filter.year_start || filter.year_end) score += STRENGTH_SCORES.YEAR;
-    if (filter.province || filter.provinces) score += STRENGTH_SCORES.PROVINCE;
-    if (filter.level || filter.levels) score += STRENGTH_SCORES.LEVEL;
-    if (filter.min_score || filter.max_score) score += STRENGTH_SCORES.SCORE;
-    if (filter.min_rank || filter.max_rank) score += STRENGTH_SCORES.RANK;
-    const types = toArray(filter.contest_type ?? filter.contest_types);
-    for (const type of types) {
-        const priority = CONTEST_PRIORITY[type];
-        if (priority === 1) score += STRENGTH_SCORES.HIGH_PRIORITY_CONTEST;
-        else if (priority === 2) score += STRENGTH_SCORES.MID_PRIORITY_CONTEST;
-        else score += STRENGTH_SCORES.LOW_PRIORITY_CONTEST;
-    }
-    return score;
-}
 // --- 内存过滤器 & SQL 查询构建器 ---
 function recordMatchesFilter(record, filter) {
     const levels = toArray(filter.level ?? filter.levels);
@@ -235,79 +177,6 @@ function recordMatchesFilter(record, filter) {
     if (contest_types.length > 0 && !contest_types.includes(record.type)) return false;
     return true;
 }
-function buildRecordSubquery(filter = {}, candidateUids = null, oierFilter = {}) {
-    const recordWhere = [], recordParams = [];
-    const contestWhere = [], contestParams = [];
-    
-    pushInClause(recordWhere, recordParams, 'cr.level', toArray(filter.level ?? filter.levels));
-    if (filter.min_score !== undefined) { recordWhere.push('cr.score >= ?'); recordParams.push(Number(filter.min_score)); }
-    if (filter.max_score !== undefined) { recordWhere.push('cr.score <= ?'); recordParams.push(Number(filter.max_score)); }
-    if (filter.min_rank !== undefined) { recordWhere.push('cr.rank >= ?'); recordParams.push(Number(filter.min_rank)); }
-    if (filter.max_rank !== undefined) { recordWhere.push('cr.rank <= ?'); recordParams.push(Number(filter.max_rank)); }
-    pushInClause(recordWhere, recordParams, 'cr.province', toArray(filter.province ?? filter.provinces));
-    pushInClause(recordWhere, recordParams, 'cr.school_id', toArray(filter.school_id ?? filter.school_ids));
-    pushInClause(recordWhere, recordParams, 'cr.contest_id', toArray(filter.contest_id ?? filter.contest_ids));
-    
-    const hasContestFilter = filter.year_start || filter.year_end || toArray(filter.years).length > 0 || filter.fall_semester !== undefined || toArray(filter.contest_type ?? filter.contest_types).length > 0;
-    if (hasContestFilter) {
-        pushInClause(contestWhere, contestParams, 'c.year', toArray(filter.years));
-        if (filter.year_start) { contestWhere.push('c.year >= ?'); contestParams.push(filter.year_start); }
-        if (filter.year_end) { contestWhere.push('c.year <= ?'); contestParams.push(filter.year_end); }
-        if (filter.fall_semester !== undefined) { contestWhere.push('c.fall_semester = ?'); contestParams.push(filter.fall_semester ? 1 : 0); }
-        pushInClause(contestWhere, contestParams, 'c.type', toArray(filter.contest_type ?? filter.contest_types));
-    }
-    
-    const filterParamCount = recordParams.length + contestParams.length;
-    const needsContestJoin = contestWhere.length > 0;
-    
-    if (candidateUids === null) { 
-        let fromClause = 'Record r';
-        const oierWhere = [], oierParams = [];
-        const hasOierFilter = oierFilter && Object.keys(oierFilter).length > 0;
-        const needsOierJoin = hasOierFilter && (
-            toArray(oierFilter.gender ?? oierFilter.genders).length > 0 ||
-            oierFilter.enroll_min !== undefined ||
-            oierFilter.enroll_max !== undefined ||
-            toArray(oierFilter.initials).length > 0
-        );
-        if (needsOierJoin) {
-            fromClause += ' JOIN OIer o ON r.oier_uid = o.uid';
-            pushInClause(oierWhere, oierParams, 'o.gender', toArray(oierFilter.gender ?? oierFilter.genders));
-            if (oierFilter.enroll_min !== undefined) { oierWhere.push('o.enroll_middle >= ?'); oierParams.push(Number(oierFilter.enroll_min)); }
-            if (oierFilter.enroll_max !== undefined) { oierWhere.push('o.enroll_middle <= ?'); oierParams.push(Number(oierFilter.enroll_max)); }
-            pushInClause(oierWhere, oierParams, 'o.initials', toArray(oierFilter.initials));
-        }
-        if (needsContestJoin) fromClause += ' JOIN Contest c ON r.contest_id = c.id';
-        
-        const initialRecordWhereClauses = [];
-        const initialRecordParams = [];
-        pushInClause(initialRecordWhereClauses, initialRecordParams, 'r.level', toArray(filter.level ?? filter.levels));
-        if (filter.min_score !== undefined) { initialRecordWhereClauses.push('r.score >= ?'); initialRecordParams.push(Number(filter.min_score)); }
-        if (filter.max_score !== undefined) { initialRecordWhereClauses.push('r.score <= ?'); initialRecordParams.push(Number(filter.max_score)); }
-        if (filter.min_rank !== undefined) { initialRecordWhereClauses.push('r.rank >= ?'); initialRecordParams.push(Number(filter.min_rank)); }
-        if (filter.max_rank !== undefined) { initialRecordWhereClauses.push('r.rank <= ?'); initialRecordParams.push(Number(filter.max_rank)); }
-        pushInClause(initialRecordWhereClauses, initialRecordParams, 'r.province', toArray(filter.province ?? filter.provinces));
-        pushInClause(initialRecordWhereClauses, initialRecordParams, 'r.school_id', toArray(filter.school_id ?? filter.school_ids));
-        pushInClause(initialRecordWhereClauses, initialRecordParams, 'r.contest_id', toArray(filter.contest_id ?? filter.contest_ids));
-        
-        const whereClauses = [...oierWhere, ...initialRecordWhereClauses, ...contestWhere];
-        const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-        const sql = `SELECT DISTINCT r.oier_uid FROM ${fromClause} ${whereSql}`;
-        const params = [...oierParams, ...initialRecordParams, ...contestParams];
-        return { sql, params, filterParamCount };
-    } else {
-        const placeholders = candidateUids.map(() => '?').join(',');
-        const cteSql = `WITH CandidateRecords AS (SELECT * FROM Record WHERE oier_uid IN (${placeholders}) LIMIT -1)`;
-        let fromClause = 'CandidateRecords cr';
-        if (needsContestJoin) fromClause += ' JOIN Contest c ON cr.contest_id = c.id';
-        const whereClauses = [...recordWhere, ...contestWhere];
-        const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-        const sql = `${cteSql} SELECT DISTINCT cr.oier_uid FROM ${fromClause} ${whereSql}`;
-        const params = [...candidateUids, ...recordParams, ...contestParams];
-        return { sql, params, filterParamCount };
-    }
-}
-const D1_MAX_VARS = 100;
 // --- 主处理器 ---
 export default async function queryOierHandler(c) {
     if (c.req.method !== "POST") return c.json({ error: "Only POST is supported" }, 405);
@@ -340,7 +209,7 @@ export default async function queryOierHandler(c) {
                 delete filter.year;
                 delete filter.year_start;
                 delete filter.year_end;
-            } else if (filter.year) {
+            } else if (filter.year !== undefined) {
                 filter.year_start = filter.year;
                 filter.year_end = filter.year;
                 delete filter.year;
@@ -354,17 +223,7 @@ export default async function queryOierHandler(c) {
             const hasOtherConditions = Object.keys(f).some(k => !['year', 'years', 'year_start', 'year_end'].includes(k));
             return !(isTooBroad && !hasOtherConditions);
         });
-        processedFilters = processedFilters.reduce((acc, current) => {
-            let shouldAdd = true;
-            const nextAcc = [];
-            for (const existing of acc) {
-                if (isSubset(current, existing)) {}
-                else if (isSubset(existing, current)) { shouldAdd = false; nextAcc.push(existing); }
-                else { nextAcc.push(existing); }
-            }
-            if (shouldAdd) nextAcc.push(current);
-            return nextAcc;
-        }, []);
+        processedFilters = removeRedundantFilters(processedFilters, min_year, max_year);
         const totalStrength = processedFilters.reduce((sum, f) => sum + getFilterStrength(f), 0) + getFilterStrength(oierFilters, true);
         if (processedFilters.length === 0 && Object.keys(oierFilters).length === 0) {
             return c.json({ error: "Query is too broad. Please provide at least one filter." }, 400);
@@ -393,27 +252,10 @@ export default async function queryOierHandler(c) {
                 const filter = recordFilters[i];
                 if (candidateUids !== null && candidateUids.length === 0) break;
                 if (i === 0 && candidateUids === null) {
-                    let effectiveFilter = { ...filter };
-                    const contestWhere = [], contestParams = [];
-                    const yearFiltersExist = filter.year_start || filter.year_end || toArray(filter.years).length > 0;
-                    if (yearFiltersExist || filter.fall_semester !== undefined || toArray(filter.contest_type ?? filter.contest_types).length > 0) {
-                        pushInClause(contestWhere, contestParams, 'c.year', toArray(filter.years));
-                        if (filter.year_start) { contestWhere.push('c.year >= ?'); contestParams.push(filter.year_start); }
-                        if (filter.year_end) { contestWhere.push('c.year <= ?'); contestParams.push(filter.year_end); }
-                        if (filter.fall_semester !== undefined) { contestWhere.push('c.fall_semester = ?'); contestParams.push(filter.fall_semester ? 1 : 0); }
-                        pushInClause(contestWhere, contestParams, 'c.type', toArray(filter.contest_type ?? filter.contest_types));
+                    const { sql, params } = buildRecordSubquery(filter, null, oierFilters);
+                    if (exceedsD1ParameterLimit(params.length)) {
+                        return c.json({ error: `Filter at index ${i} is too complex...` }, 400);
                     }
-                    if (contestWhere.length > 0) {
-                        const contestSql = `SELECT id FROM Contest c WHERE ${contestWhere.join(' AND ')}`;
-                        const { results: contestResults, meta: contestMeta } = await c.env.DB.prepare(contestSql).bind(...contestParams).all();
-                        usageSteps.push(formatUsageStep("initial_contest_prefilter", contestMeta));
-                        const candidateContestIds = contestResults ? contestResults.map(row => row.id) : [];
-                        if (candidateContestIds.length === 0) { candidateUids = []; break; }
-                        const existingIds = toArray(effectiveFilter.contest_id ?? effectiveFilter.contest_ids);
-                        effectiveFilter.contest_ids = [...new Set([...existingIds, ...candidateContestIds])];
-                    }
-                    
-                    const { sql, params } = buildRecordSubquery(effectiveFilter, null, oierFilters);
                     const { results: recordResults, meta: recordMeta } = await c.env.DB.prepare(sql).bind(...params).all();
                     usageSteps.push(formatUsageStep("initial_record_query", recordMeta));
                     const uids = new Set();
@@ -451,7 +293,7 @@ export default async function queryOierHandler(c) {
                     usageSteps.push(formatUsageStep(`in_memory_verification_${i}`, {}));
                 } else {
                     const { filterParamCount } = buildRecordSubquery(filter);
-                    if (filterParamCount >= D1_MAX_VARS) { return c.json({ error: `Filter at index ${i} is too complex...` }, 400); }
+                    if (exceedsD1ParameterLimit(filterParamCount, 1)) { return c.json({ error: `Filter at index ${i} is too complex...` }, 400); }
                     const dynamicChunkSize = D1_MAX_VARS - filterParamCount;
                     const chunks = candidateUids ? [] : [null];
                     if (candidateUids) { for (let j = 0; j < candidateUids.length; j += dynamicChunkSize) { chunks.push(candidateUids.slice(j, j + dynamicChunkSize)); } }
@@ -490,7 +332,7 @@ export default async function queryOierHandler(c) {
             if (oierFilters.enroll_max !== undefined) { oierWhereClauses.push('o.enroll_middle <= ?'); oierBaseParams.push(Number(oierFilters.enroll_max)); }
             pushInClause(oierWhereClauses, oierBaseParams, 'o.initials', toArray(oierFilters.initials));
         }
-        if (oierBaseParams.length >= D1_MAX_VARS) { return c.json({ error: "Oier filter is too complex..." }, 400); }
+        if (exceedsD1ParameterLimit(oierBaseParams.length, 1)) { return c.json({ error: "Oier filter is too complex..." }, 400); }
         
         let allOiers = [];
         if (candidateUids !== null) {

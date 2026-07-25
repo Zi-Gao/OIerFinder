@@ -10,9 +10,7 @@ import {
   SelectTrigger, 
   SelectValue 
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { X, ChevronDown, ChevronUp, Trophy, Calendar, MapPin, Hash, GraduationCap } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 const CONTEST_TYPES = ["CSP入门", "CSP提高", "NOIP普及", "NOIP提高", "NOIP", "WC", "NOID类", "NOI", "APIO", "CTSC"];
 const LEVELS = ["金牌", "银牌", "铜牌", "一等奖", "二等奖", "三等奖"];
@@ -29,21 +27,18 @@ function RecordFilter({ filter, onChange, onRemove }) {
     onChange({ ...filter, [name]: value === 'any' ? '' : value });
   };
 
-  const handleSwitchChange = (name, checked) => {
-    onChange({ ...filter, [name]: checked });
+  const handleSemesterChange = (value) => {
+    const nextFilter = { ...filter };
+    if (value === 'any') {
+      delete nextFilter.fall_semester;
+    } else {
+      nextFilter.fall_semester = value === 'fall';
+    }
+    onChange(nextFilter);
   };
   
   const toggleAdvanced = () => {
-    if (showAdvanced) {
-      const {
-        years, provinces, contest_ids, school_ids,
-        min_score, max_score, min_rank, max_rank, fall_semester,
-        year_start, year_end,
-        ...basicFilter
-      } = filter;
-      onChange(basicFilter);
-    }
-    setShowAdvanced(!showAdvanced);
+    setShowAdvanced((current) => !current);
   };
 
   return (
@@ -172,17 +167,30 @@ function RecordFilter({ filter, onChange, onRemove }) {
                 </div>
               </div>
 
-              <div className="flex flex-col justify-end">
-                <div className="flex items-center space-x-3 h-10">
-                  <Switch 
-                    id={`fall-semester-${filter.year}-${Math.random()}`} 
-                    checked={!!filter.fall_semester} 
-                    onCheckedChange={(val) => handleSwitchChange('fall_semester', val)} 
-                  />
-                  <Label htmlFor={`fall-semester-${filter.year}-${Math.random()}`} className="text-sm font-semibold cursor-pointer">
-                    Fall Semester Only
-                  </Label>
-                </div>
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">
+                  <GraduationCap className="size-3" />
+                  Academic Term
+                </Label>
+                <Select
+                  value={
+                    filter.fall_semester === true
+                      ? 'fall'
+                      : filter.fall_semester === false
+                        ? 'non-fall'
+                        : 'any'
+                  }
+                  onValueChange={handleSemesterChange}
+                >
+                  <SelectTrigger className="bg-muted/20 h-10 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="any">Any term</SelectItem>
+                    <SelectItem value="fall">Fall term (new school year)</SelectItem>
+                    <SelectItem value="non-fall">Non-fall term (previous school year)</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
