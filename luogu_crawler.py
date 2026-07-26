@@ -3,8 +3,7 @@ import json
 from utils import luogu_crawl
 
 
-top1000=luogu_crawl.getTop1000User()
+top1000 = luogu_crawl.getTop1000User()
 
-
-f=open("luogu_user.txt","w")
-json.dump(luogu_crawl.getPrizes(top1000),f,ensure_ascii=False)
+with open("luogu_user.txt", "w", encoding="utf-8") as f:
+    json.dump(luogu_crawl.getPrizes(top1000), f, ensure_ascii=False)

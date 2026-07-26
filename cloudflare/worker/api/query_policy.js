@@ -2,6 +2,16 @@ import { toArray } from './record_query.js';
 
 export const D1_MAX_VARS = 100;
 
+const FILTER_ALIAS_PAIRS = [
+    ['level', 'levels'],
+    ['province', 'provinces'],
+    ['school_id', 'school_ids'],
+    ['contest_id', 'contest_ids'],
+    ['contest_type', 'contest_types'],
+    ['year', 'years'],
+    ['gender', 'genders'],
+];
+
 const STRENGTH_SCORES = {
     CONTEST_ID: 10,
     SCHOOL_ID: 8,
@@ -35,6 +45,28 @@ function hasValue(value) {
 
 function hasBound(value) {
     return value !== undefined && value !== null;
+}
+
+function hasMeaningfulInput(value) {
+    if (!hasBound(value)) return false;
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === 'string') return value.trim().length > 0;
+    return true;
+}
+
+export function assertNoConflictingFilterAliases(filter) {
+    for (const [singularKey, pluralKey] of FILTER_ALIAS_PAIRS) {
+        if (
+            Object.hasOwn(filter, singularKey) &&
+            Object.hasOwn(filter, pluralKey) &&
+            hasMeaningfulInput(filter[singularKey]) &&
+            hasMeaningfulInput(filter[pluralKey])
+        ) {
+            throw new Error(
+                `Invalid filter: '${singularKey}' and '${pluralKey}' cannot be provided together.`,
+            );
+        }
+    }
 }
 
 export function exceedsD1ParameterLimit(parameterCount, reservedParameters = 0) {

@@ -18,6 +18,45 @@ export function pushInClause(targetWhere, targetParams, column, values) {
     targetParams.push(...values);
 }
 
+export function recordMatchesFilter(record, filter) {
+    const levels = toArray(filter.level ?? filter.levels);
+    if (levels.length > 0 && !levels.includes(record.level)) return false;
+
+    const hasScoreBound =
+        filter.min_score !== undefined || filter.max_score !== undefined;
+    if (hasScoreBound && (record.score === null || record.score === undefined)) {
+        return false;
+    }
+    if (filter.min_score !== undefined && record.score < Number(filter.min_score)) return false;
+    if (filter.max_score !== undefined && record.score > Number(filter.max_score)) return false;
+
+    const hasRankBound =
+        filter.min_rank !== undefined || filter.max_rank !== undefined;
+    if (hasRankBound && (record.rank === null || record.rank === undefined)) {
+        return false;
+    }
+    if (filter.min_rank !== undefined && record.rank < Number(filter.min_rank)) return false;
+    if (filter.max_rank !== undefined && record.rank > Number(filter.max_rank)) return false;
+
+    const provinces = toArray(filter.province ?? filter.provinces);
+    if (provinces.length > 0 && !provinces.includes(record.province)) return false;
+    const schoolIds = toArray(filter.school_id ?? filter.school_ids);
+    if (schoolIds.length > 0 && !schoolIds.includes(record.school_id)) return false;
+    const contestIds = toArray(filter.contest_id ?? filter.contest_ids);
+    if (contestIds.length > 0 && !contestIds.includes(record.contest_id)) return false;
+    const years = toArray(filter.years);
+    if (years.length > 0 && !years.includes(record.year)) return false;
+    if (filter.year_start !== undefined && record.year < Number(filter.year_start)) return false;
+    if (filter.year_end !== undefined && record.year > Number(filter.year_end)) return false;
+    if (
+        filter.fall_semester !== undefined &&
+        record.fall_semester !== (filter.fall_semester ? 1 : 0)
+    ) return false;
+    const contestTypes = toArray(filter.contest_type ?? filter.contest_types);
+    if (contestTypes.length > 0 && !contestTypes.includes(record.type)) return false;
+    return true;
+}
+
 export function buildRecordSubquery(filter = {}, candidateUids = null, oierFilter = {}) {
     const recordWhere = [], recordParams = [];
     const contestWhere = [], contestParams = [];

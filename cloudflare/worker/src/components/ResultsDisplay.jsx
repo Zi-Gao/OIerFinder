@@ -56,7 +56,9 @@ function ResultsDisplay({ results, error, loading }) {
   };
 
   const formatCCFLevel = (level) => {
-    if (!level) return <span className="text-muted-foreground text-xs">—</span>;
+    if (level === null || level === undefined || level === '') {
+      return <span className="text-muted-foreground text-xs">—</span>;
+    }
     const numLevel = parseInt(level);
     if (isNaN(numLevel)) return level;
     
@@ -115,7 +117,7 @@ function ResultsDisplay({ results, error, loading }) {
                                 </a>
                             </TableCell>
                             <TableCell className="px-6 py-4">{formatGender(oier.gender)}</TableCell>
-                            <TableCell className="px-6 py-4 font-medium text-xs">{oier.enroll_middle || 'N/A'}</TableCell>
+                            <TableCell className="px-6 py-4 font-medium text-xs">{oier.enroll_middle ?? 'N/A'}</TableCell>
                             <TableCell className="px-6 py-4 text-right font-mono font-bold text-xs">{oier.oierdb_score}</TableCell>
                             <TableCell className="px-6 py-4 text-right font-mono font-bold text-xs">{oier.ccf_score}</TableCell>
                             <TableCell className="px-6 py-4 text-center">{formatCCFLevel(oier.ccf_level)}</TableCell>

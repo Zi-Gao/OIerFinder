@@ -1,6 +1,9 @@
 // cloudflare/worker/functions/get_luogu_prizes.js
 
-import { getPrizes } from './luogu_to_query.js';
+import {
+    generateQueryPayload,
+    getPrizes,
+} from './luogu_to_query.js';
 
 export default async function getLuoguPrizesHandler(c) {
     const ADMIN_SECRET = c.env.ADMIN_SECRET;
@@ -26,6 +29,7 @@ export default async function getLuoguPrizesHandler(c) {
 
         return c.json({
             prizes: prizeList,
+            query_payload: generateQueryPayload(result.prizes),
             synced: result.synced,
             sync_error: result.error
         });

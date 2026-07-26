@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    assertNoConflictingFilterAliases,
     exceedsD1ParameterLimit,
     getFilterStrength,
 } from './query_policy.js';
@@ -42,4 +43,28 @@ test('D1 parameter limit includes reserved parameters', () => {
     assert.equal(exceedsD1ParameterLimit(101), true);
     assert.equal(exceedsD1ParameterLimit(99, 1), false);
     assert.equal(exceedsD1ParameterLimit(100, 1), true);
+});
+
+test('singular and plural aliases cannot both constrain the same dimension', () => {
+    assert.throws(
+        () => assertNoConflictingFilterAliases({
+            contest_id: 114,
+            contest_ids: [111, 112],
+        }),
+        /Invalid filter: 'contest_id' and 'contest_ids' cannot be provided together/,
+    );
+    assert.throws(
+        () => assertNoConflictingFilterAliases({
+            gender: '男',
+            genders: ['女'],
+        }),
+        /Invalid filter: 'gender' and 'genders' cannot be provided together/,
+    );
+});
+
+test('an empty plural alias does not conflict with a meaningful singular value', () => {
+    assert.doesNotThrow(() => assertNoConflictingFilterAliases({
+        contest_id: 114,
+        contest_ids: [],
+    }));
 });

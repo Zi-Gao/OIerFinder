@@ -189,7 +189,7 @@ export async function getPrizes(uid, sync, env, ctx) {
 
 
 // --- 端点处理器 (适配为 Hono Handler) ---
-function generateQueryPayload(prizes) {
+export function generateQueryPayload(prizes) {
     const noiSeriesPrizes = prizes.filter(p => p.is_noi_series);
     const recordFilters = noiSeriesPrizes.map(prize => {
         const mappedContest = CONTEST_MAPPING[prize.contest_name];

@@ -5,15 +5,13 @@ import LuoguQuery from './components/LuoguQuery';
 import ResultsDisplay from './components/ResultsDisplay';
 import { searchOiers } from './api/client';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
-import { LayoutGrid, Braces, UserCircle, Search, Zap, Code2, ExternalLink, Cloud, Moon, Sun, Settings2 } from "lucide-react";
+import { LayoutGrid, Braces, UserCircle, Code2, ExternalLink, Cloud, Moon, Sun, Settings2 } from "lucide-react";
 import logo from './logo.svg';
 import BannerCard from './components/BannerCard';
 import InteractiveBackground from './components/InteractiveBackground';
@@ -26,6 +24,9 @@ const TABS = {
 
 // 辅助函数：清理过滤器中的空值
 const cleanObject = (obj) => {
+    if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+      throw new Error('Each filter must be a JSON object.');
+    }
     const newObj = {};
     for (const key in obj) {
         const value = obj[key];
@@ -51,53 +52,75 @@ function App() {
   const [error, setError] = useState('');
 
   // --- 全局设置状态 ---
-  const [adminSecret, setAdminSecret] = useState(() => localStorage.getItem('oierFinderAdminSecret') || '');
-  const [limit, setLimit] = useState(() => parseInt(localStorage.getItem('oierFinderLimit'), 10) || 10);
+  const [adminSecret, setAdminSecret] = useState('');
+  const [limit, setLimit] = useState(() => {
+    const storedLimit = Number.parseInt(
+      localStorage.getItem('oierFinderLimit'),
+      10,
+    );
+    return Number.isFinite(storedLimit) && storedLimit > 0
+      ? Math.min(storedLimit, 100)
+      : 10;
+  });
 
   useEffect(() => {
+    // Secrets are intentionally kept in memory only. Remove values persisted by
+    // older versions of the UI.
+    localStorage.removeItem('oierFinderAdminSecret');
     setMounted(true);
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem('oierFinderAdminSecret', adminSecret);
-  }, [adminSecret]);
 
   useEffect(() => {
     localStorage.setItem('oierFinderLimit', limit);
   }, [limit]);
 
   // --- 核心搜索函数 ---
-  const handleSearch = async (currentRecordFilters, currentOierFilters) => {
+  const handleSearch = async (currentRecordFilters, currentOierFilters, currentLimit = limit) => {
     setLoading(true);
     setError('');
     setResults(null);
-    
-    const stringToArray = (str) => str.split(',').map(item => item.trim()).filter(Boolean);
-    const stringToNumberArray = (str) => stringToArray(str).map(Number);
-
-    const processedRecordFilters = currentRecordFilters
-      .map(f => {
-        const cleaned = cleanObject(f);
-        if (cleaned.provinces && typeof cleaned.provinces === 'string') cleaned.provinces = stringToArray(cleaned.provinces);
-        if (cleaned.years && typeof cleaned.years === 'string') cleaned.years = stringToNumberArray(cleaned.years);
-        if (cleaned.contest_ids && typeof cleaned.contest_ids === 'string') cleaned.contest_ids = stringToNumberArray(cleaned.contest_ids);
-        if (cleaned.school_ids && typeof cleaned.school_ids === 'string') cleaned.school_ids = stringToNumberArray(cleaned.school_ids);
-        return cleaned;
-      })
-      .filter(f => Object.keys(f).length > 0);
-      
-    const processedOierFilters = cleanObject(currentOierFilters);
-    if (processedOierFilters.initials && typeof processedOierFilters.initials === 'string') {
-        processedOierFilters.initials = stringToArray(processedOierFilters.initials);
-    }
-
-    const payload = {
-      record_filters: processedRecordFilters,
-      oier_filters: processedOierFilters,
-      limit: Number(limit) || 10
-    };
 
     try {
+      if (!Array.isArray(currentRecordFilters)) {
+        throw new Error("'record_filters' must be an array.");
+      }
+
+      const stringToArray = (str) => str.split(',').map(item => item.trim()).filter(Boolean);
+      const stringToNumberArray = (str, fieldName) => {
+        const values = stringToArray(str).map(Number);
+        if (values.some(value => !Number.isFinite(value))) {
+          throw new Error(`All values in '${fieldName}' must be numbers.`);
+        }
+        return values;
+      };
+
+      const processedRecordFilters = currentRecordFilters
+        .map(f => {
+          const cleaned = cleanObject(f);
+          if (cleaned.provinces && typeof cleaned.provinces === 'string') cleaned.provinces = stringToArray(cleaned.provinces);
+          if (cleaned.years && typeof cleaned.years === 'string') cleaned.years = stringToNumberArray(cleaned.years, 'years');
+          if (cleaned.contest_ids && typeof cleaned.contest_ids === 'string') cleaned.contest_ids = stringToNumberArray(cleaned.contest_ids, 'contest_ids');
+          if (cleaned.school_ids && typeof cleaned.school_ids === 'string') cleaned.school_ids = stringToNumberArray(cleaned.school_ids, 'school_ids');
+          return cleaned;
+        })
+        .filter(f => Object.keys(f).length > 0);
+
+      const processedOierFilters = cleanObject(currentOierFilters);
+      if (processedOierFilters.initials && typeof processedOierFilters.initials === 'string') {
+          processedOierFilters.initials = stringToArray(processedOierFilters.initials);
+      }
+
+      const requestedLimit = Number(currentLimit);
+      if (!Number.isFinite(requestedLimit) || requestedLimit <= 0) {
+        throw new Error("'limit' must be a positive number.");
+      }
+
+      const payload = {
+        record_filters: processedRecordFilters,
+        oier_filters: processedOierFilters,
+        limit: Math.min(Math.floor(requestedLimit), 100)
+      };
+
       const data = await searchOiers(payload, adminSecret);
       setResults(data);
       if (data.data.length === 0) {
@@ -236,6 +259,7 @@ function App() {
                     setRecordFilters(newRecords);
                     setOierFilters(newOier);
                   }}
+                  onLimitChange={setLimit}
                   onSearch={handleSearch}
                   loading={loading}
                 />

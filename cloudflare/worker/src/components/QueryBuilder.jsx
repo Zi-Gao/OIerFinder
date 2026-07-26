@@ -12,7 +12,7 @@ import {
   SelectTrigger, 
   SelectValue 
 } from "@/components/ui/select";
-import { PlusCircle, Search, Settings2, User, Trophy } from "lucide-react";
+import { PlusCircle, Settings2, User, Trophy } from "lucide-react";
 
 function QueryBuilder({ 
     recordFilters, 
@@ -133,14 +133,14 @@ function QueryBuilder({
                   <Input 
                     type="number" 
                     placeholder="From" 
-                    value={oierFilters.enroll_min || ''} 
+                    value={oierFilters.enroll_min ?? ''}
                     onChange={(e) => handleOierFilterChange('enroll_min', e.target.value)}
                     className="bg-muted/5 h-10 border-muted/40 text-sm shadow-sm"
                   />
                   <Input 
                     type="number" 
                     placeholder="To" 
-                    value={oierFilters.enroll_max || ''} 
+                    value={oierFilters.enroll_max ?? ''}
                     onChange={(e) => handleOierFilterChange('enroll_max', e.target.value)}
                     className="bg-muted/5 h-10 border-muted/40 text-sm shadow-sm"
                   />

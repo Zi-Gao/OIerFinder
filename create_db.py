@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import os
+import tempfile
 
 # --- 数据源文件 ---
 DIST_DIR = 'oierdb-data/dist'
@@ -138,25 +139,59 @@ def load_results_data(cursor):
     cursor.executemany('INSERT INTO Record (oier_uid, contest_id, school_id, score, rank, province, level) VALUES (?, ?, ?, ?, ?, ?, ?)', records_to_insert)
     print(f"Inserted {len(records_to_insert)} Records.")
 
+def validate_database(cursor):
+    """在替换现有数据库前验证新数据库完整性。"""
+    for table_name in ("School", "Contest", "OIer", "Record"):
+        row_count = cursor.execute(
+            f"SELECT COUNT(*) FROM {table_name}"
+        ).fetchone()[0]
+        if row_count <= 0:
+            raise RuntimeError(
+                f"Generated table {table_name} is empty; keeping the existing database."
+            )
+
+    foreign_key_errors = cursor.execute("PRAGMA foreign_key_check").fetchall()
+    if foreign_key_errors:
+        raise RuntimeError(
+            f"Generated database has {len(foreign_key_errors)} foreign key errors; "
+            "keeping the existing database."
+        )
+
 def main():
     """主函数"""
-    if os.path.exists(DB_FILE):
-        os.remove(DB_FILE)
-
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
+    target_path = os.path.abspath(DB_FILE)
+    target_dir = os.path.dirname(target_path)
+    temp_fd, temp_path = tempfile.mkstemp(
+        prefix=f".{os.path.basename(DB_FILE)}.",
+        suffix=".tmp",
+        dir=target_dir,
+    )
+    os.close(temp_fd)
+    conn = None
 
     try:
+        conn = sqlite3.connect(temp_path)
+        conn.execute("PRAGMA foreign_keys = ON")
+        cursor = conn.cursor()
         create_tables(cursor)
         load_static_data(cursor)
         load_results_data(cursor)
+        validate_database(cursor)
         conn.commit()
+        conn.close()
+        conn = None
+        os.replace(temp_path, target_path)
         print(f"\nDatabase '{DB_FILE}' created and populated successfully!")
     except Exception as e:
         print(f"\nAn error occurred: {e}")
-        conn.rollback()
+        if conn is not None:
+            conn.rollback()
+        raise
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
     print(f"\nProcess finished. Check for '{DB_FILE}'.")
 

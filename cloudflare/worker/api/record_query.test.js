@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildRecordSubquery } from './record_query.js';
+import {
+    buildRecordSubquery,
+    recordMatchesFilter,
+} from './record_query.js';
 
 test('initial query combines explicit contest IDs with contest metadata constraints using AND', () => {
     const { sql, params } = buildRecordSubquery({
@@ -34,4 +37,17 @@ test('subsequent candidate query keeps contest IDs and metadata constraints toge
     assert.match(sql, /c\.fall_semester = \?/);
     assert.match(sql, /c\.type IN \(\?,\?\)/);
     assert.deepEqual(params, [7, 8, 101, 0, 'CSP提高', 'NOIP']);
+});
+
+test('in-memory numeric filters reject null values like SQL does', () => {
+    const record = {
+        score: null,
+        rank: null,
+    };
+
+    assert.equal(recordMatchesFilter(record, { min_score: 0 }), false);
+    assert.equal(recordMatchesFilter(record, { max_score: 100 }), false);
+    assert.equal(recordMatchesFilter(record, { min_rank: 1 }), false);
+    assert.equal(recordMatchesFilter(record, { max_rank: 100 }), false);
+    assert.equal(recordMatchesFilter(record, {}), true);
 });

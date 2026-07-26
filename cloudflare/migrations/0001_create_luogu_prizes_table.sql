@@ -1,6 +1,5 @@
 -- migrations/0001_create_luogu_prizes_table.sql
-DROP TABLE IF EXISTS LuoguPrizes;
--- 如果表已存在，则不执行任何操作，避免出错
+-- 迁移必须可安全重放；已有表和数据保持不变。
 CREATE TABLE IF NOT EXISTS LuoguPrizes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     luogu_uid INTEGER NOT NULL,

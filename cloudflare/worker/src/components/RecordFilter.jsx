@@ -101,7 +101,7 @@ function RecordFilter({ filter, onChange, onRemove }) {
               type="number" 
               name="year" 
               placeholder="e.g., 2023" 
-              value={filter.year || ''} 
+              value={filter.year ?? ''}
               onChange={handleInputChange} 
               className="bg-muted/30 h-10"
             />
@@ -132,8 +132,8 @@ function RecordFilter({ filter, onChange, onRemove }) {
                   Year Range
                 </Label>
                 <div className="grid grid-cols-2 gap-4 items-center">
-                  <Input type="number" name="year_start" placeholder="From" value={filter.year_start || ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
-                  <Input type="number" name="year_end" placeholder="To" value={filter.year_end || ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
+                  <Input type="number" name="year_start" placeholder="From" value={filter.year_start ?? ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
+                  <Input type="number" name="year_end" placeholder="To" value={filter.year_end ?? ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
                 </div>
               </div>
 
@@ -151,8 +151,8 @@ function RecordFilter({ filter, onChange, onRemove }) {
                   Score Range
                 </Label>
                 <div className="grid grid-cols-2 gap-3">
-                  <Input type="number" name="min_score" placeholder="Min" value={filter.min_score || ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
-                  <Input type="number" name="max_score" placeholder="Max" value={filter.max_score || ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
+                  <Input type="number" name="min_score" placeholder="Min" value={filter.min_score ?? ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
+                  <Input type="number" name="max_score" placeholder="Max" value={filter.max_score ?? ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
                 </div>
               </div>
               
@@ -162,8 +162,8 @@ function RecordFilter({ filter, onChange, onRemove }) {
                   Rank Range
                 </Label>
                 <div className="grid grid-cols-2 gap-3">
-                  <Input type="number" name="min_rank" placeholder="Min" value={filter.min_rank || ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
-                  <Input type="number" name="max_rank" placeholder="Max" value={filter.max_rank || ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
+                  <Input type="number" name="min_rank" placeholder="Min" value={filter.min_rank ?? ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
+                  <Input type="number" name="max_rank" placeholder="Max" value={filter.max_rank ?? ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
                 </div>
               </div>
 

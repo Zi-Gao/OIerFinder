@@ -3,6 +3,7 @@ import sqlite3
 import json
 import argparse
 import os
+import tempfile
 from collections import defaultdict
 
 def generate_stats_json(db_path, output_path):
@@ -11,8 +12,7 @@ def generate_stats_json(db_path, output_path):
     详细统计数据的嵌套 JSON 对象，用于 Cloudflare Worker。
     """
     if not os.path.exists(db_path):
-        print(f"❌ 错误: 数据库文件未找到: '{db_path}'")
-        return
+        raise FileNotFoundError(f"数据库文件未找到: '{db_path}'")
 
     print(f"🔗 正在连接到数据库: {db_path}...")
 
@@ -50,8 +50,7 @@ def generate_stats_json(db_path, output_path):
         min_year, max_year = (year_row[0], year_row[1]) if year_row else (None, None)
         
         if min_year is None:
-            print("🟡 警告: Contest 表中没有数据，无法确定年份范围。")
-            return
+            raise RuntimeError("Contest 表中没有数据，无法确定年份范围。")
 
         print(f"📅 全局年份范围: {min_year} - {max_year}")
 
@@ -61,8 +60,7 @@ def generate_stats_json(db_path, output_path):
         results = cursor.fetchall()
 
         if not results:
-            print("🟡 查询没有返回任何统计结果。")
-            return
+            raise RuntimeError("查询没有返回任何统计结果。")
 
         # 构建嵌套字典结构: stats[year][type][province][level] = count
         stats_data = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
@@ -77,16 +75,31 @@ def generate_stats_json(db_path, output_path):
         }
 
         print(f"✍️ 正在将 {len(results)} 条统计结果和年份范围写入到 JSON 文件: {output_path}...")
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
-            # indent=None 可以生成更紧凑的单行 JSON，减小 Worker 文件体积
-            json.dump(final_json_output, f, ensure_ascii=False)
+
+        absolute_output_path = os.path.abspath(output_path)
+        output_dir = os.path.dirname(absolute_output_path)
+        temp_fd, temp_output_path = tempfile.mkstemp(
+            prefix=f".{os.path.basename(output_path)}.",
+            suffix=".tmp",
+            dir=output_dir,
+        )
+        try:
+            with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+                # indent=None 可以生成更紧凑的单行 JSON，减小 Worker 文件体积
+                json.dump(final_json_output, f, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_output_path, absolute_output_path)
+        finally:
+            if os.path.exists(temp_output_path):
+                os.remove(temp_output_path)
 
         print("\n✅ JSON 统计文件生成成功！")
         print(f"💡 下一步：将 '{output_path}' 文件放到你的 Worker 项目目录下，并确保构建工具能处理 JSON 导入。")
 
     except sqlite3.Error as e:
         print(f"❌ 数据库错误: {e}")
+        raise
     finally:
         if conn:
             conn.close()

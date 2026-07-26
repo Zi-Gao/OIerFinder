@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { getLuoguPrizes, getQueryFromJson } from '../api/client';
+import { getLuoguPrizes } from '../api/client';
 import BannerCard from './BannerCard';
 import ActionBar from './ActionBar';
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,6 +21,7 @@ import { toast } from "sonner";
 function LuoguQuery({ adminSecret, onImportQuery }) {
   const [uid, setUid] = useState('');
   const [prizes, setPrizes] = useState(null);
+  const [queryPayload, setQueryPayload] = useState(null);
   const [loading, setLoading] = useState({ prizes: false, import: false });
   const [error, setError] = useState('');
 
@@ -30,12 +30,14 @@ function LuoguQuery({ adminSecret, onImportQuery }) {
       toast.error('Please enter a Luogu UID.');
       return;
     }
-    setLoading({ ...loading, prizes: true });
+    setLoading(current => ({ ...current, prizes: true }));
     setError('');
     setPrizes(null);
+    setQueryPayload(null);
     try {
       const data = await getLuoguPrizes(uid, adminSecret);
       setPrizes(data.prizes);
+      setQueryPayload(data.query_payload);
       if (data.synced) {
         toast.success(`Fetched ${data.prizes.length} awards from Luogu.`);
       } else {
@@ -45,24 +47,24 @@ function LuoguQuery({ adminSecret, onImportQuery }) {
       setError(err.message);
       toast.error("Failed to fetch awards.");
     } finally {
-      setLoading({ ...loading, prizes: false });
+      setLoading(current => ({ ...current, prizes: false }));
     }
   };
 
-  const handleImport = async () => {
-    setLoading({ ...loading, import: true });
+  const handleImport = () => {
+    if (!queryPayload) {
+      toast.error("No query payload is available. Fetch awards again.");
+      return;
+    }
+    setLoading(current => ({ ...current, import: true }));
     setError('');
     try {
-      const queryPayload = await getQueryFromJson(uid, adminSecret);
       onImportQuery(queryPayload);
-      if (!queryPayload.synced) {
-        toast.info("Imported historical query (Luogu sync failed).");
-      }
     } catch (err) {
       setError(err.message);
       toast.error("Failed to import query.");
     } finally {
-      setLoading({ ...loading, import: false });
+      setLoading(current => ({ ...current, import: false }));
     }
   };
 
@@ -83,7 +85,12 @@ function LuoguQuery({ adminSecret, onImportQuery }) {
                   id="luogu-uid"
                   type="text"
                   value={uid}
-                  onChange={(e) => setUid(e.target.value)}
+                  onChange={(e) => {
+                    setUid(e.target.value);
+                    setPrizes(null);
+                    setQueryPayload(null);
+                    setError('');
+                  }}
                   placeholder="e.g., 2"
                   className="pl-10 bg-muted/5 h-10 border-muted/40 text-sm shadow-sm"
                 />
@@ -130,7 +137,7 @@ function LuoguQuery({ adminSecret, onImportQuery }) {
                   <TableBody>
                     {prizes.map((p, i) => (
                       <TableRow key={i} className="hover:bg-primary/5 transition-colors border-muted/20">
-                        <TableCell className="px-6 py-3 font-medium text-xs text-muted-foreground">{p.year || 'N/A'}</TableCell>
+                        <TableCell className="px-6 py-3 font-medium text-xs text-muted-foreground">{p.year ?? 'N/A'}</TableCell>
                         <TableCell className="px-6 py-3 font-bold text-foreground text-sm">{p.contest_name}</TableCell>
                         <TableCell className="px-6 py-3">
                           {p.is_noi_series ? (

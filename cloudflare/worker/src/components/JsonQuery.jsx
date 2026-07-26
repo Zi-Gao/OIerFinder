@@ -1,18 +1,44 @@
 import React, { useState, useEffect } from 'react';
 import BannerCard from './BannerCard';
 import ActionBar from './ActionBar';
-import { Button } from "@/components/ui/button";
-import { Search, Code2 } from "lucide-react";
+import { Code2 } from "lucide-react";
 
 function JsonQuery({ 
     recordFilters, 
     oierFilters, 
     onFiltersChange, 
+    onLimitChange,
     onSearch,
     limit,
     loading
 }) {
   const [jsonString, setJsonString] = useState('');
+
+  const parsePayload = (value) => {
+    const parsed = JSON.parse(value);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('The payload must be a JSON object.');
+    }
+    if (!Array.isArray(parsed.record_filters)) {
+      throw new Error("'record_filters' must be an array.");
+    }
+    if (
+      typeof parsed.oier_filters !== 'object' ||
+      parsed.oier_filters === null ||
+      Array.isArray(parsed.oier_filters)
+    ) {
+      throw new Error("'oier_filters' must be an object.");
+    }
+    const parsedLimit = Number(parsed.limit);
+    if (!Number.isFinite(parsedLimit) || parsedLimit <= 0) {
+      throw new Error("'limit' must be a positive number.");
+    }
+    return {
+      recordFilters: parsed.record_filters,
+      oierFilters: parsed.oier_filters,
+      limit: Math.min(Math.floor(parsedLimit), 100),
+    };
+  };
 
   useEffect(() => {
     const queryPayload = {
@@ -27,11 +53,10 @@ function JsonQuery({
     const newJsonString = e.target.value;
     setJsonString(newJsonString);
     try {
-      const parsed = JSON.parse(newJsonString);
-      const newRecords = Array.isArray(parsed.record_filters) ? parsed.record_filters : [{}];
-      const newOier = typeof parsed.oier_filters === 'object' && parsed.oier_filters !== null ? parsed.oier_filters : {};
-      onFiltersChange(newRecords, newOier);
-    } catch (error) {
+      const parsed = parsePayload(newJsonString);
+      onFiltersChange(parsed.recordFilters, parsed.oierFilters);
+      onLimitChange(parsed.limit);
+    } catch {
       // Allow invalid JSON while typing
     }
   };
@@ -39,8 +64,8 @@ function JsonQuery({
   const handleSubmit = (e) => {
     if (e) e.preventDefault();
     try {
-        const parsed = JSON.parse(jsonString);
-        onSearch(parsed.record_filters || [], parsed.oier_filters || {});
+        const parsed = parsePayload(jsonString);
+        onSearch(parsed.recordFilters, parsed.oierFilters, parsed.limit);
     } catch (err) {
         alert("Invalid JSON format: " + err.message);
     }

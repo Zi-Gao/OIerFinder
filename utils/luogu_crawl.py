@@ -3,6 +3,7 @@ import requests
 from tqdm import trange,tqdm
 
 PRIZE_BASE_URL="https://www.luogu.com.cn/offlinePrize/getList"
+REQUEST_TIMEOUT_SECONDS = 15
 
 UA = 'OlerFinder-Bot/1.0 (+https://github.com/Zi-Gao/OIerFinder)'
 
@@ -12,19 +13,26 @@ BASE_HEADER = {
 
 def requestPrizeList(uid):
     url=f"{PRIZE_BASE_URL}/{uid}"
-    response = requests.get(url, headers=BASE_HEADER)
+    response = requests.get(
+        url,
+        headers=BASE_HEADER,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
     return response
 
 def getPrizeList(uid):
     prize=[]
-    res=requestPrizeList(uid)
 
     try:
+        res=requestPrizeList(uid)
+        res.raise_for_status()
         data=json.loads(res.text)["prizes"]
         for pri in data:
             prize.append(pri["prize"])
-    except Exception as e:
-        tqdm.write(res.status_code,res.text)
+    except requests.exceptions.RequestException as e:
+        tqdm.write(f"Luogu prize request failed for UID {uid}: {e}")
+    except (KeyError, TypeError, json.JSONDecodeError):
+        tqdm.write(f"Luogu prize request failed ({res.status_code}): {res.text}")
     return prize
 
 def getPrizes(uids):
@@ -60,7 +68,12 @@ RANK_HEADER = {
 def getRankPage(i):
     uids=[]
     url=f"{RANK_BASE_URL}{i}"
-    response = requests.get(url, headers=RANK_HEADER)
+    response = requests.get(
+        url,
+        headers=RANK_HEADER,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
     data=json.loads(response.text)['data']["ranking"]["result"]
     for j in range(len(data)):
         uids.append(data[j]["user"]["uid"])

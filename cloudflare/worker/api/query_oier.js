@@ -4,17 +4,60 @@ import CONTEST_STATS_DATA from './contest_stats.json';
 import { removeRedundantFilters } from './filter_subset.js';
 import {
     D1_MAX_VARS,
+    assertNoConflictingFilterAliases,
     exceedsD1ParameterLimit,
     getFilterStrength,
 } from './query_policy.js';
-import { buildRecordSubquery, pushInClause, toArray } from './record_query.js';
+import {
+    buildRecordSubquery,
+    pushInClause,
+    recordMatchesFilter,
+    toArray,
+} from './record_query.js';
 // --- 业务逻辑与安全常量 ---
 const { min_year, max_year, stats: CONTEST_STATS } = CONTEST_STATS_DATA;
 const MINIMUM_QUERY_STRENGTH = 20;
 const MAX_FILTERS_ALLOWED = 20;
+const MAX_D1_CHUNKS_PER_FILTER = 50;
+const D1_QUERY_CONCURRENCY = 8;
 // --- 辅助函数 ---
 function formatUsageStep(name, meta) { return { name, rows_read: meta?.rows_read ?? 0, rows_written: meta?.rows_written ?? 0, duration_ms: meta?.duration ?? 0 }; }
-function normalizeLimit(value, fallback = 100) { const num = Number(value); if (!Number.isFinite(num) || num <= 0) return fallback; return Math.min(Math.floor(num), 100); }
+function parseFiniteNumber(value, fieldName) {
+    if (
+        typeof value === 'boolean' ||
+        (typeof value === 'string' && value.trim().length === 0)
+    ) {
+        throw new Error(`'${fieldName}' must be a valid number.`);
+    }
+    const numberValue = Number(value);
+    if (!Number.isFinite(numberValue)) {
+        throw new Error(`'${fieldName}' must be a valid number.`);
+    }
+    return numberValue;
+}
+function normalizeLimit(value) {
+    const numberValue = parseFiniteNumber(value, 'limit');
+    if (numberValue <= 0) {
+        throw new Error("'limit' must be a positive number.");
+    }
+    return Math.min(Math.floor(numberValue), 100);
+}
+async function mapWithConcurrency(items, concurrency, mapper) {
+    const results = new Array(items.length);
+    let nextIndex = 0;
+    const workers = Array.from(
+        { length: Math.min(concurrency, items.length) },
+        async () => {
+            while (nextIndex < items.length) {
+                const currentIndex = nextIndex;
+                nextIndex += 1;
+                results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+            }
+        },
+    );
+    await Promise.all(workers);
+    return results;
+}
 
 // [新增] 输入验证与清理函数，作为第一道安全防线
 const ALLOWED_RECORD_KEYS = new Set([
@@ -28,11 +71,15 @@ function validateAndSanitizeFilter(filter, allowedKeys) {
     if (typeof filter !== 'object' || filter === null || Array.isArray(filter)) {
         throw new Error('Filter must be an object.');
     }
-    const sanitized = {};
-    for (const [key, rawValue] of Object.entries(filter)) {
+    for (const key of Object.keys(filter)) {
         if (!allowedKeys.has(key)) {
             throw new Error(`Invalid filter parameter: '${key}'`);
         }
+    }
+    assertNoConflictingFilterAliases(filter);
+
+    const sanitized = {};
+    for (const [key, rawValue] of Object.entries(filter)) {
         if (rawValue === undefined || rawValue === null) continue;
 
         // 对不同类型的 key 进行类型检查和清理
@@ -43,10 +90,10 @@ function validateAndSanitizeFilter(filter, allowedKeys) {
             case 'min_score': case 'max_score':
             case 'min_rank': case 'max_rank':
             case 'school_id': case 'contest_id':
-                const num = Number(rawValue);
-                if (!Number.isFinite(num)) throw new Error(`'${key}' must be a valid number.`);
-                sanitized[key] = num;
+            {
+                sanitized[key] = parseFiniteNumber(rawValue, key);
                 break;
+            }
             // 布尔型
             case 'fall_semester':
                 if (typeof rawValue !== 'boolean') {
@@ -61,20 +108,26 @@ function validateAndSanitizeFilter(filter, allowedKeys) {
                 break;
             // 数值数组
             case 'years': case 'school_ids': case 'contest_ids':
-                const numArray = toArray(rawValue).map(Number);
-                if (numArray.some(n => !Number.isFinite(n))) throw new Error(`All items in '${key}' must be valid numbers.`);
+            {
+                const numArray = toArray(rawValue).map(
+                    value => parseFiniteNumber(value, key),
+                );
                 if (numArray.length > 0) sanitized[key] = [...new Set(numArray)];
                 break;
+            }
             // 字符串数组
             case 'levels': case 'provinces': case 'contest_types': case 'genders': case 'initials':
+            {
                 const strArray = toArray(rawValue);
                 if (strArray.some(s => (typeof s !== 'string' && typeof s !== 'number') || String(s).trim().length === 0)) throw new Error(`All items in '${key}' must be non-empty strings or numbers.`);
                 if (strArray.length > 0) {
                     sanitized[key] = [...new Set(strArray.map(s => String(s).trim()))];
                 }
                 break;
+            }
             // 兼容性字段 (gender -> genders)
             case 'gender':
+            {
                 let gVal = rawValue;
                 if (gVal !== null && gVal !== undefined) {
                      const gStr = String(gVal).trim();
@@ -83,6 +136,7 @@ function validateAndSanitizeFilter(filter, allowedKeys) {
                      }
                 }
                 break;
+            }
             default:
                 sanitized[key] = rawValue; // 对于未明确处理但允许的键，直接赋值
                 break;
@@ -92,7 +146,7 @@ function validateAndSanitizeFilter(filter, allowedKeys) {
 }
 
 function validateAndSanitizePayload(payload) {
-    if (typeof payload !== 'object' || payload === null) {
+    if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
         throw new Error("Request body must be a valid JSON object.");
     }
 
@@ -154,36 +208,13 @@ function getFilterSelectivity(filter) {
     }
     return estimatedCount > 0 ? estimatedCount : 1;
 }
-// --- 内存过滤器 & SQL 查询构建器 ---
-function recordMatchesFilter(record, filter) {
-    const levels = toArray(filter.level ?? filter.levels);
-    if (levels.length > 0 && !levels.includes(record.level)) return false;
-    if (filter.min_score !== undefined && record.score < Number(filter.min_score)) return false;
-    if (filter.max_score !== undefined && record.score > Number(filter.max_score)) return false;
-    if (filter.min_rank !== undefined && record.rank < Number(filter.min_rank)) return false;
-    if (filter.max_rank !== undefined && record.rank > Number(filter.max_rank)) return false;
-    const provinces = toArray(filter.province ?? filter.provinces);
-    if (provinces.length > 0 && !provinces.includes(record.province)) return false;
-    const school_ids = toArray(filter.school_id ?? filter.school_ids);
-    if (school_ids.length > 0 && !school_ids.includes(record.school_id)) return false;
-    const contest_ids = toArray(filter.contest_id ?? filter.contest_ids);
-    if (contest_ids.length > 0 && !contest_ids.includes(record.contest_id)) return false;
-    const years = toArray(filter.years);
-    if (years.length > 0 && !years.includes(record.year)) return false;
-    if (filter.year_start !== undefined && record.year < Number(filter.year_start)) return false;
-    if (filter.year_end !== undefined && record.year > Number(filter.year_end)) return false;
-    if (filter.fall_semester !== undefined && record.fall_semester !== (filter.fall_semester ? 1 : 0)) return false;    
-    const contest_types = toArray(filter.contest_type ?? filter.contest_types);
-    if (contest_types.length > 0 && !contest_types.includes(record.type)) return false;
-    return true;
-}
 // --- 主处理器 ---
 export default async function queryOierHandler(c) {
     if (c.req.method !== "POST") return c.json({ error: "Only POST is supported" }, 405);
 
     try {
         let payload;
-        try { payload = await c.req.json(); } catch (err) { return c.json({ error: "Invalid JSON" }, 400); }
+        try { payload = await c.req.json(); } catch { return c.json({ error: "Invalid JSON" }, 400); }
 
         // [新增] 阶段 -1: 输入验证与清理
         // 在这里调用新的验证函数，如果输入不合法，它会抛出错误，被外层 try...catch 捕获并返回 400 错误。
@@ -202,6 +233,11 @@ export default async function queryOierHandler(c) {
         if (!isAdmin && initialRecordFilters.length > MAX_FILTERS_ALLOWED) {
             return c.json({ error: `Too many record filters. A maximum of ${MAX_FILTERS_ALLOWED} is allowed.` }, 400);
         }
+        const strengthFilters = removeRedundantFilters(
+            initialRecordFilters,
+            min_year,
+            max_year,
+        );
         let processedFilters = initialRecordFilters.map(f => {
             let filter = { ...f };
             const yearsArray = toArray(filter.years);
@@ -224,7 +260,10 @@ export default async function queryOierHandler(c) {
             return !(isTooBroad && !hasOtherConditions);
         });
         processedFilters = removeRedundantFilters(processedFilters, min_year, max_year);
-        const totalStrength = processedFilters.reduce((sum, f) => sum + getFilterStrength(f), 0) + getFilterStrength(oierFilters, true);
+        const totalStrength = strengthFilters.reduce(
+            (sum, filter) => sum + getFilterStrength(filter),
+            0,
+        ) + getFilterStrength(oierFilters, true);
         if (processedFilters.length === 0 && Object.keys(oierFilters).length === 0) {
             return c.json({ error: "Query is too broad. Please provide at least one filter." }, 400);
         }
@@ -297,11 +336,19 @@ export default async function queryOierHandler(c) {
                     const dynamicChunkSize = D1_MAX_VARS - filterParamCount;
                     const chunks = candidateUids ? [] : [null];
                     if (candidateUids) { for (let j = 0; j < candidateUids.length; j += dynamicChunkSize) { chunks.push(candidateUids.slice(j, j + dynamicChunkSize)); } }
-                    const promises = chunks.map(chunk => {
-                        const { sql, params } = buildRecordSubquery(filter, chunk);
-                        return c.env.DB.prepare(sql).bind(...params).all();
-                    });
-                    const resultsFromChunks = await Promise.all(promises);
+                    if (!isAdmin && chunks.length > MAX_D1_CHUNKS_PER_FILTER) {
+                        return c.json({
+                            error: `Filter at index ${i} would require ${chunks.length} database queries. Add a more selective filter first.`,
+                        }, 400);
+                    }
+                    const resultsFromChunks = await mapWithConcurrency(
+                        chunks,
+                        D1_QUERY_CONCURRENCY,
+                        (chunk) => {
+                            const { sql, params } = buildRecordSubquery(filter, chunk);
+                            return c.env.DB.prepare(sql).bind(...params).all();
+                        },
+                    );
                     const newUids = new Set();
                     resultsFromChunks.forEach((res, chunkIndex) => {
                         usageSteps.push(formatUsageStep(`record_filter_${i}_chunk_${chunkIndex}`, res.meta));
