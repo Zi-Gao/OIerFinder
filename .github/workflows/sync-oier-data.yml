@@ -47,7 +47,7 @@ jobs:
       CLOUDFLARE_DATABASE_ID: ${{ secrets.CLOUDFLARE_DATABASE_ID }}
       CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
       D1_BATCH_SIZE: "5000"
-      OIER_DATABASE_PATH: ${{ github.workspace }}/oier_data.db
+      OIER_DATABASE_PATH: ${{ runner.temp }}/oier_data.db
 
     steps:
       - name: Check out repository
@@ -213,7 +213,7 @@ jobs:
         run: |
           uv run python create_db.py
           uv run python calculate_stats.py \
-            --db oier_data.db \
+            --db "$OIER_DATABASE_PATH" \
             --output cloudflare/worker/api/contest_stats.json
 
       - name: Create release manifest
@@ -231,18 +231,25 @@ jobs:
           import os
           import sqlite3
 
-          files = ("oier_data.db", "cloudflare/worker/api/contest_stats.json")
+          database_path = os.environ["OIER_DATABASE_PATH"]
+          files = (
+              ("database", database_path),
+              ("contest_stats", "cloudflare/worker/api/contest_stats.json"),
+          )
           digest = hashlib.sha256()
           file_hashes = {}
-          for path in files:
+          for name, path in files:
               file_digest = hashlib.sha256()
               with open(path, "rb") as source:
                   while chunk := source.read(1024 * 1024):
                       digest.update(chunk)
                       file_digest.update(chunk)
-              file_hashes[path] = file_digest.hexdigest()
+              file_hashes[name] = file_digest.hexdigest()
 
-          with sqlite3.connect("file:oier_data.db?mode=ro", uri=True) as connection:
+          with sqlite3.connect(
+              f"file:{database_path}?mode=ro",
+              uri=True,
+          ) as connection:
               counts = {
                   table: connection.execute(
                       f"SELECT COUNT(*) FROM {table}"
@@ -290,7 +297,6 @@ jobs:
         with:
           name: oier-data-${{ steps.detect.outputs.upstream_sha }}
           path: |
-            oier_data.db
             cloudflare/worker/api/contest_stats.json
             release-manifest.json
           if-no-files-found: error
@@ -356,3 +362,19 @@ jobs:
             echo "- Data hash: \`${{ steps.manifest.outputs.data_hash }}\`"
             echo "- Source data hash: \`${{ steps.content.outputs.source_data_hash }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove temporary database
+        if: always()
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          database_path = Path(os.environ["OIER_DATABASE_PATH"]).resolve()
+          runner_temp = Path(os.environ["RUNNER_TEMP"]).resolve()
+          if database_path.parent != runner_temp:
+              raise RuntimeError(
+                  f"Refusing to remove database outside RUNNER_TEMP: {database_path}"
+              )
+          database_path.unlink(missing_ok=True)
+          PY

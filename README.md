@@ -42,7 +42,8 @@ pip install -r requirements.txt
    ```bash
    python create_db.py
    ```
-   该操作会读取 `oierdb-data/dist` 下的 JSON 与文本数据，生成本地数据库 `oier_data.db`。
+   该操作会读取 `oierdb-data/dist` 下的 JSON 与文本数据，生成仅供本地查询使用且不会
+   纳入 Git 的运行时数据库 `oier_data.db`。
 
 ---
 
@@ -82,6 +83,10 @@ python oierfinder.py -c sample_config.yml
 - **D1 Database**: 存储结构化选手数据。
 - **Frontend**: 基于 React 的现代化单页应用（`cloudflare/worker/src`）。
 
+部署后可通过 `/docs` 查看并在线调试 API，通过 `/openapi.json` 获取 OpenAPI 3.1
+机器可读契约。接口结构、参数限制、响应模型和洛谷同步的写入副作用均以该契约为准。
+修改 Worker API 时，`npm test` 会自动校验 OpenAPI 文档格式以及业务路由覆盖情况。
+
 ### 部署流程简述：
 1. **自动化一键部署**：
    项目提供 `update_cloudflare.py` 脚本，可一键完成子仓库更新、数据生成、统计计算、D1 同步及 Worker 部署：
@@ -119,8 +124,9 @@ python oierfinder.py -c sample_config.yml
 
 首次运行会应用 D1 migrations 并创建 `DataRelease` 表。流水线依次执行数据生成、
 完整性检查、Worker 测试与构建、Worker 部署、D1 暂存上传与事务切换，最后把对应
-上游 SHA 标记为 active。生成的 SQLite、统计 JSON 和发布清单会作为 GitHub Actions
-artifact 保留 14 天。当前数据发布使用完整快照而不是逐行增量；这是因为上游的学校、
+上游 SHA 标记为 active。SQLite 只存在于 Runner 临时目录并在结束时删除；统计 JSON
+和发布清单会作为 GitHub Actions artifact 保留 14 天。当前数据发布使用完整快照而
+不是逐行增量；这是因为上游的学校、
 比赛和记录 ID 依赖生成顺序，并非稳定业务主键。`source_data_hash` 内容检测保证未变化
 的数据不会重复构建和上传，而发生变化时仍通过完整暂存和事务切换保证关联关系一致；
 升级后的首次运行会为相同 active 上游版本补写该字段，不会因此重写核心数据。

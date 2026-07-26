@@ -1,6 +1,7 @@
 import subprocess
 import sys
 import os
+import tempfile
 
 # --- 配置 ---
 # 获取脚本所在的目录，以确保路径正确
@@ -11,7 +12,6 @@ OIERDB_DATA_DIR = os.path.join(BASE_DIR, 'oierdb-data')
 CLOUDFLARE_SCRIPT_DIR = os.path.join(BASE_DIR, 'cloudflare', 'script')
 CLOUDFLARE_WORKER_DIR = os.path.join(BASE_DIR, 'cloudflare', 'worker')
 STATS_OUTPUT_PATH = os.path.join(CLOUDFLARE_WORKER_DIR, 'api', 'contest_stats.json')
-LOCAL_DB_PATH = os.path.join(BASE_DIR, 'oier_data.db')
 
 # --- 辅助函数 ---
 def print_step(message):
@@ -20,7 +20,7 @@ def print_step(message):
     print(f"  {message}")
     print("="*60)
 
-def run_command(command, cwd=None):
+def run_command(command, cwd=None, env=None):
     """执行一个 shell 命令，实时打印输出，并在失败时退出"""
     print(f"""\n▶️  Executing: {' '.join(command)}""")
     print(f"   (in directory: {cwd or BASE_DIR})")
@@ -32,7 +32,8 @@ def run_command(command, cwd=None):
         stderr=subprocess.STDOUT,
         text=True,
         encoding='utf-8',
-        bufsize=1
+        bufsize=1,
+        env=env,
     )
     
     for line in iter(process.stdout.readline, ''):
@@ -59,22 +60,52 @@ def main():
     print_step("Step 3: Generating latest data files from submodule")
     run_command([sys.executable, "main.py"], cwd=OIERDB_DATA_DIR)
     
-    print_step("Step 4: Re-creating local SQLite database (oier_data.db)")
-    run_command([sys.executable, "create_db.py"])
+    with tempfile.TemporaryDirectory(prefix="oierfinder-") as temp_dir:
+        local_db_path = os.path.join(temp_dir, "oier_data.db")
+        deployment_env = os.environ.copy()
+        deployment_env["OIER_DATABASE_PATH"] = local_db_path
 
-    print_step("Step 5: Calculating contest stats and updating JSON")
-    run_command([sys.executable, "calculate_stats.py", "--db", LOCAL_DB_PATH, "--output", STATS_OUTPUT_PATH])
+        print_step("Step 4: Building temporary SQLite database")
+        run_command(
+            [sys.executable, "create_db.py"],
+            env=deployment_env,
+        )
 
-    print_step("Step 6: Uploading all new data to Cloudflare D1")
-    run_command([sys.executable, "upload_to_d1.py"], cwd=CLOUDFLARE_SCRIPT_DIR)
+        print_step("Step 5: Calculating contest stats and updating JSON")
+        run_command(
+            [
+                sys.executable,
+                "calculate_stats.py",
+                "--db",
+                local_db_path,
+                "--output",
+                STATS_OUTPUT_PATH,
+            ],
+            env=deployment_env,
+        )
 
-    print_step("Step 7: Optimizing Database Indexes")
-    # 建立索引是降低 D1 扫描行数、减少成本的关键
-    run_command([sys.executable, "create_indexes.py"], cwd=CLOUDFLARE_SCRIPT_DIR)
+        print_step("Step 6: Uploading all new data to Cloudflare D1")
+        run_command(
+            [sys.executable, "upload_to_d1.py"],
+            cwd=CLOUDFLARE_SCRIPT_DIR,
+            env=deployment_env,
+        )
 
-    print_step("Step 8: Deploying the Cloudflare Worker")
-    # 确保 npx 在你的系统 PATH 中
-    run_command(["npm", "run", "deploy"], cwd=CLOUDFLARE_WORKER_DIR)
+        print_step("Step 7: Optimizing Database Indexes")
+        # 建立索引是降低 D1 扫描行数、减少成本的关键
+        run_command(
+            [sys.executable, "create_indexes.py"],
+            cwd=CLOUDFLARE_SCRIPT_DIR,
+            env=deployment_env,
+        )
+
+        print_step("Step 8: Deploying the Cloudflare Worker")
+        # 确保 npx 在你的系统 PATH 中
+        run_command(
+            ["npm", "run", "deploy"],
+            cwd=CLOUDFLARE_WORKER_DIR,
+            env=deployment_env,
+        )
 
     print("\n" + "*"*60)
     print("🎉 All steps completed successfully! Your Cloudflare application is updated and deployed.")

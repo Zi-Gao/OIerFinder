@@ -1,6 +1,6 @@
 // cloudflare/worker/functions/query_oier.js
 // 1. [数据导入] 从外部 JSON 文件导入预计算的统计数据。
-import CONTEST_STATS_DATA from './contest_stats.json';
+import CONTEST_STATS_DATA from './contest_stats.json' with { type: 'json' };
 import { removeRedundantFilters } from './filter_subset.js';
 import {
     D1_MAX_VARS,

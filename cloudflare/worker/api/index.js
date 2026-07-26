@@ -6,6 +6,7 @@ import queryOierHandler from './query_oier.js';
 import luoguToQueryHandler from './luogu_to_query.js';
 import getLuoguPrizesHandler from './get_luogu_prizes.js';
 import versionHandler from './version.js';
+import { registerApiDocs } from './docs.js';
 
 const app = new Hono();
 
@@ -14,6 +15,7 @@ app.post('/query-oier', queryOierHandler);
 app.get('/luogu/to_query', luoguToQueryHandler);
 app.get('/luogu/prizes', getLuoguPrizesHandler);
 app.get('/version', versionHandler);
+registerApiDocs(app);
 
 // --- 静态文件服务 ---
 // 这是让 Hono 将所有未匹配 API 路由的请求都交给静态资源处理器

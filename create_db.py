@@ -9,7 +9,7 @@ STATIC_FILE = os.path.join(DIST_DIR, 'static.json')
 RESULT_FILE = os.path.join(DIST_DIR, 'result.txt')
 
 # --- 输出文件 ---
-DB_FILE = 'oier_data.db'
+DB_FILE = os.environ.get('OIER_DATABASE_PATH', 'oier_data.db')
 
 # 从 util.py 中复制，用于解码索引
 PROVINCES = [
