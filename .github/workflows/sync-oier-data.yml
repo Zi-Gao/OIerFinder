@@ -69,10 +69,23 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --locked
 
+      - name: Validate deployment scripts
+        run: |
+          uv run python -m py_compile \
+            create_db.py \
+            calculate_stats.py \
+            cloudflare/script/data_fingerprint.py \
+            cloudflare/script/upload_to_d1.py \
+            cloudflare/script/create_indexes.py \
+            utils/luogu_crawl.py \
+            luogu_crawler.py
+          uv run python -m unittest \
+            cloudflare.script.test_data_fingerprint \
+            cloudflare.script.test_upload_to_d1
+
       - name: Detect upstream data change
         id: detect
         env:
-          EVENT_NAME: ${{ github.event_name }}
           FORCE_INPUT: ${{ github.event.inputs.force }}
           REQUESTED_SHA: ${{ github.event.inputs.upstream_sha }}
         run: |
@@ -89,61 +102,126 @@ jobs:
           upstream_sha="$(git -C oierdb-data rev-parse FETCH_HEAD)"
           git -C oierdb-data checkout --detach "$upstream_sha"
           active_sha="$(uv run python cloudflare/script/upload_to_d1.py --print-active-sha)"
+          active_source_data_hash="$(
+            uv run python cloudflare/script/upload_to_d1.py \
+              --print-active-source-data-hash
+          )"
 
           force_data_update=false
           if [[ "$FORCE_INPUT" == "true" ]]; then
             force_data_update=true
           fi
 
-          should_update_data=false
-          if [[ "$force_data_update" == "true" || "$upstream_sha" != "$active_sha" ]]; then
-            should_update_data=true
-          fi
-
-          should_deploy_worker=false
-          if [[ "$EVENT_NAME" == "push" || "$should_update_data" == "true" ]]; then
-            should_deploy_worker=true
+          should_inspect_data=false
+          if [[
+            "$force_data_update" == "true" ||
+            "$upstream_sha" != "$active_sha" ||
+            -z "$active_source_data_hash"
+          ]]; then
+            should_inspect_data=true
           fi
 
           echo "upstream_sha=$upstream_sha" >> "$GITHUB_OUTPUT"
           echo "active_sha=$active_sha" >> "$GITHUB_OUTPUT"
+          echo "active_source_data_hash=$active_source_data_hash" >> "$GITHUB_OUTPUT"
+          echo "force_data_update=$force_data_update" >> "$GITHUB_OUTPUT"
+          echo "should_inspect_data=$should_inspect_data" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### OIer upstream change detection"
+            echo "- Upstream SHA: \`$upstream_sha\`"
+            echo "- Active SHA: \`${active_sha:-none}\`"
+            echo "- Active source data hash: \`${active_source_data_hash:-none}\`"
+            echo "- Forced data update: \`$force_data_update\`"
+            echo "- Content inspection required: \`$should_inspect_data\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate upstream distribution files
+        if: steps.detect.outputs.should_inspect_data == 'true'
+        working-directory: oierdb-data
+        run: ../.venv/bin/python main.py
+
+      - name: Compare generated data content
+        id: content
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FORCE_DATA_UPDATE: ${{ steps.detect.outputs.force_data_update }}
+          SHOULD_INSPECT_DATA: ${{ steps.detect.outputs.should_inspect_data }}
+          UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
+          ACTIVE_SHA: ${{ steps.detect.outputs.active_sha }}
+          ACTIVE_SOURCE_DATA_HASH: ${{ steps.detect.outputs.active_source_data_hash }}
+        run: |
+          source_data_hash=""
+          content_changed=false
+          metadata_advanced=false
+          should_initialize_source_hash=false
+          should_update_data=false
+
+          if [[ "$SHOULD_INSPECT_DATA" == "true" ]]; then
+            source_data_hash="$(
+              uv run python cloudflare/script/data_fingerprint.py
+            )"
+
+            if [[ "$FORCE_DATA_UPDATE" == "true" ]]; then
+              should_update_data=true
+            elif [[ -z "$ACTIVE_SOURCE_DATA_HASH" ]]; then
+              if [[ -n "$ACTIVE_SHA" && "$UPSTREAM_SHA" == "$ACTIVE_SHA" ]]; then
+                should_initialize_source_hash=true
+              else
+                content_changed=true
+                should_update_data=true
+              fi
+            elif [[ "$source_data_hash" != "$ACTIVE_SOURCE_DATA_HASH" ]]; then
+              content_changed=true
+              should_update_data=true
+            else
+              uv run python cloudflare/script/upload_to_d1.py \
+                --advance-source-sha "$UPSTREAM_SHA" \
+                --source-data-hash "$source_data_hash"
+              metadata_advanced=true
+            fi
+          fi
+
+          should_deploy_worker=false
+          if [[
+            "$EVENT_NAME" == "push" ||
+            "$should_update_data" == "true" ||
+            "$should_initialize_source_hash" == "true"
+          ]]; then
+            should_deploy_worker=true
+          fi
+
+          echo "source_data_hash=$source_data_hash" >> "$GITHUB_OUTPUT"
+          echo "content_changed=$content_changed" >> "$GITHUB_OUTPUT"
+          echo "metadata_advanced=$metadata_advanced" >> "$GITHUB_OUTPUT"
+          echo "should_initialize_source_hash=$should_initialize_source_hash" >> "$GITHUB_OUTPUT"
           echo "should_update_data=$should_update_data" >> "$GITHUB_OUTPUT"
           echo "should_deploy_worker=$should_deploy_worker" >> "$GITHUB_OUTPUT"
 
           {
-            echo "### OIer data change detection"
-            echo "- Upstream SHA: \`$upstream_sha\`"
-            echo "- Active SHA: \`${active_sha:-none}\`"
-            echo "- Forced data update: \`$force_data_update\`"
-            echo "- Data update required: \`$should_update_data\`"
+            echo "### OIer data content comparison"
+            echo "- Generated source data hash: \`${source_data_hash:-not-generated}\`"
+            echo "- Content changed: \`$content_changed\`"
+            echo "- Metadata-only SHA advance: \`$metadata_advanced\`"
+            echo "- Source hash initialization required: \`$should_initialize_source_hash\`"
+            echo "- Core data update required: \`$should_update_data\`"
             echo "- Worker deployment required: \`$should_deploy_worker\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Generate upstream distribution files
-        if: steps.detect.outputs.should_update_data == 'true'
-        working-directory: oierdb-data
-        run: ../.venv/bin/python main.py
-
       - name: Build and validate local database
-        if: steps.detect.outputs.should_update_data == 'true'
+        if: steps.content.outputs.should_update_data == 'true'
         run: |
           uv run python create_db.py
           uv run python calculate_stats.py \
             --db oier_data.db \
             --output cloudflare/worker/api/contest_stats.json
-          uv run python -m py_compile \
-            create_db.py \
-            calculate_stats.py \
-            cloudflare/script/upload_to_d1.py \
-            cloudflare/script/create_indexes.py \
-            utils/luogu_crawl.py \
-            luogu_crawler.py
 
       - name: Create release manifest
-        if: steps.detect.outputs.should_update_data == 'true'
+        if: steps.content.outputs.should_update_data == 'true'
         id: manifest
         env:
           UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
+          SOURCE_DATA_HASH: ${{ steps.content.outputs.source_data_hash }}
           WORKER_VERSION: ${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -178,6 +256,7 @@ jobs:
               "worker_version": os.environ["WORKER_VERSION"],
               "github_run_url": os.environ["RUN_URL"],
               "data_hash": data_hash,
+              "source_data_hash": os.environ["SOURCE_DATA_HASH"],
               "file_hashes": file_hashes,
               "row_counts": counts,
           }
@@ -189,7 +268,7 @@ jobs:
           PY
 
       - name: Set up Node.js
-        if: steps.detect.outputs.should_deploy_worker == 'true'
+        if: steps.content.outputs.should_deploy_worker == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: "22"
@@ -197,7 +276,7 @@ jobs:
           cache-dependency-path: cloudflare/worker/package-lock.json
 
       - name: Install and validate Worker
-        if: steps.detect.outputs.should_deploy_worker == 'true'
+        if: steps.content.outputs.should_deploy_worker == 'true'
         working-directory: cloudflare/worker
         run: |
           npm ci
@@ -206,7 +285,7 @@ jobs:
           npm run build
 
       - name: Archive generated release
-        if: steps.detect.outputs.should_update_data == 'true'
+        if: steps.content.outputs.should_update_data == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: oier-data-${{ steps.detect.outputs.upstream_sha }}
@@ -219,14 +298,24 @@ jobs:
           compression-level: 6
 
       - name: Apply D1 migrations
-        if: steps.detect.outputs.should_deploy_worker == 'true'
+        if: steps.content.outputs.should_deploy_worker == 'true'
         working-directory: cloudflare/worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
         run: npx wrangler d1 migrations apply DB --remote --config wrangler.toml
 
+      - name: Initialize active source data hash
+        if: steps.content.outputs.should_initialize_source_hash == 'true'
+        env:
+          UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
+          SOURCE_DATA_HASH: ${{ steps.content.outputs.source_data_hash }}
+        run: |
+          uv run python cloudflare/script/upload_to_d1.py \
+            --initialize-source-sha "$UPSTREAM_SHA" \
+            --source-data-hash "$SOURCE_DATA_HASH"
+
       - name: Deploy Worker
-        if: steps.detect.outputs.should_deploy_worker == 'true'
+        if: steps.content.outputs.should_deploy_worker == 'true'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
@@ -235,25 +324,27 @@ jobs:
           command: deploy --keep-vars --var OIERFINDER_SHA:${{ github.sha }}
 
       - name: Upload and promote D1 data
-        if: steps.detect.outputs.should_update_data == 'true'
+        if: steps.content.outputs.should_update_data == 'true'
         env:
           UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
           DATA_HASH: ${{ steps.manifest.outputs.data_hash }}
+          SOURCE_DATA_HASH: ${{ steps.content.outputs.source_data_hash }}
           WORKER_VERSION: ${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           uv run python cloudflare/script/upload_to_d1.py \
             --source-sha "$UPSTREAM_SHA" \
             --data-hash "$DATA_HASH" \
+            --source-data-hash "$SOURCE_DATA_HASH" \
             --worker-version "$WORKER_VERSION" \
             --run-url "$RUN_URL"
 
       - name: Ensure D1 indexes
-        if: steps.detect.outputs.should_deploy_worker == 'true'
+        if: steps.content.outputs.should_deploy_worker == 'true'
         run: uv run python cloudflare/script/create_indexes.py
 
       - name: Activate release
-        if: steps.detect.outputs.should_update_data == 'true'
+        if: steps.content.outputs.should_update_data == 'true'
         env:
           UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
         run: |
@@ -263,4 +354,5 @@ jobs:
             echo "### Deployment completed"
             echo "- Active upstream SHA: \`$UPSTREAM_SHA\`"
             echo "- Data hash: \`${{ steps.manifest.outputs.data_hash }}\`"
+            echo "- Source data hash: \`${{ steps.content.outputs.source_data_hash }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

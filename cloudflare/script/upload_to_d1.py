@@ -261,12 +261,25 @@ def ensure_remote_schema(cfg):
 
 def get_release(cfg):
     execute_d1_sql(cfg, RELEASE_SCHEMA)
+    schema_data = _execute_d1_request(
+        cfg,
+        "query",
+        {"sql": "PRAGMA table_info(DataRelease)"},
+    )
+    schema_rows = schema_data["result"][0].get("results", [])
+    release_columns = {row.get("name") for row in schema_rows}
+    source_hash_column = (
+        "source_data_hash"
+        if "source_data_hash" in release_columns
+        else "NULL AS source_data_hash"
+    )
     data = _execute_d1_request(
         cfg,
         "query",
         {
             "sql": (
-                "SELECT upstream_sha, data_hash, worker_version, status, "
+                "SELECT upstream_sha, data_hash, "
+                f"{source_hash_column}, worker_version, status, "
                 "oier_count, contest_count, school_count, record_count, "
                 "github_run_url, updated_at, activated_at "
                 "FROM DataRelease WHERE id = 1"
@@ -282,6 +295,64 @@ def get_active_release_sha(cfg):
     if not release or release.get("status") != "active":
         return ""
     return release.get("upstream_sha", "")
+
+
+def get_active_release_source_data_hash(cfg):
+    release = get_release(cfg)
+    if not release or release.get("status") != "active":
+        return ""
+    return release.get("source_data_hash") or ""
+
+
+def advance_release_source_sha(cfg, source_sha, expected_source_data_hash):
+    execute_d1_batch(
+        cfg,
+        [
+            {
+                "sql": (
+                    "UPDATE DataRelease "
+                    "SET upstream_sha = ?1, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = 1 AND status = 'active' "
+                    "AND source_data_hash = ?2"
+                ),
+                "params": [source_sha, expected_source_data_hash],
+            }
+        ],
+    )
+    release = get_release(cfg)
+    if (
+        not release
+        or release.get("upstream_sha") != source_sha
+        or release.get("source_data_hash") != expected_source_data_hash
+        or release.get("status") != "active"
+    ):
+        raise RuntimeError("无法推进上游 SHA：active 数据版本已发生变化")
+
+
+def initialize_release_source_data_hash(cfg, source_sha, source_data_hash):
+    execute_d1_batch(
+        cfg,
+        [
+            {
+                "sql": (
+                    "UPDATE DataRelease "
+                    "SET source_data_hash = ?2, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = 1 AND status = 'active' "
+                    "AND upstream_sha = ?1 "
+                    "AND (source_data_hash IS NULL OR source_data_hash = '')"
+                ),
+                "params": [source_sha, source_data_hash],
+            }
+        ],
+    )
+    release = get_release(cfg)
+    if (
+        not release
+        or release.get("upstream_sha") != source_sha
+        or release.get("source_data_hash") != source_data_hash
+        or release.get("status") != "active"
+    ):
+        raise RuntimeError("无法初始化源数据哈希：active 数据版本已发生变化")
 
 
 def activate_release(cfg, source_sha):
@@ -401,17 +472,19 @@ def promote_staging_tables(cfg, expected_counts, release_metadata=None):
             {
                 "sql": """
                     INSERT INTO DataRelease (
-                        id, upstream_sha, data_hash, worker_version, status,
-                        oier_count, contest_count, school_count, record_count,
-                        github_run_url, updated_at, activated_at
+                        id, upstream_sha, data_hash, source_data_hash,
+                        worker_version, status, oier_count, contest_count,
+                        school_count, record_count, github_run_url,
+                        updated_at, activated_at
                     )
                     VALUES (
-                        1, ?1, ?2, ?3, 'promoted',
-                        ?4, ?5, ?6, ?7, ?8, CURRENT_TIMESTAMP, NULL
+                        1, ?1, ?2, ?3, ?4, 'promoted',
+                        ?5, ?6, ?7, ?8, ?9, CURRENT_TIMESTAMP, NULL
                     )
                     ON CONFLICT(id) DO UPDATE SET
                         upstream_sha = excluded.upstream_sha,
                         data_hash = excluded.data_hash,
+                        source_data_hash = excluded.source_data_hash,
                         worker_version = excluded.worker_version,
                         status = excluded.status,
                         oier_count = excluded.oier_count,
@@ -425,6 +498,7 @@ def promote_staging_tables(cfg, expected_counts, release_metadata=None):
                 "params": [
                     release_metadata["source_sha"],
                     release_metadata["data_hash"],
+                    release_metadata["source_data_hash"],
                     release_metadata.get("worker_version"),
                     expected_counts["OIer"],
                     expected_counts["Contest"],
@@ -482,11 +556,28 @@ def parse_args():
         help="打印当前已激活的上游提交 SHA",
     )
     mode.add_argument(
+        "--print-active-source-data-hash",
+        action="store_true",
+        help="打印当前已激活版本的上游生成数据 SHA-256",
+    )
+    mode.add_argument(
         "--activate-source-sha",
         help="将已完成冒烟测试的上游提交标记为 active",
     )
+    mode.add_argument(
+        "--advance-source-sha",
+        help="数据内容未变化时，仅推进 active 版本的上游提交 SHA",
+    )
+    mode.add_argument(
+        "--initialize-source-sha",
+        help="为相同上游提交的 active 版本初始化源数据哈希",
+    )
     parser.add_argument("--source-sha", help="本次数据对应的上游提交 SHA")
     parser.add_argument("--data-hash", help="本次数据构建产物的 SHA-256")
+    parser.add_argument(
+        "--source-data-hash",
+        help="上游生成的 result.txt 与 static.json 内容 SHA-256",
+    )
     parser.add_argument("--worker-version", help="本次部署的 Worker 版本")
     parser.add_argument("--run-url", help="触发本次发布的 GitHub Actions 地址")
     return parser.parse_args()
@@ -500,6 +591,37 @@ def main():
         print(get_active_release_sha(cfg))
         return
 
+    if args.print_active_source_data_hash:
+        print(get_active_release_source_data_hash(cfg))
+        return
+
+    if args.advance_source_sha:
+        if not args.source_data_hash:
+            raise ValueError(
+                "指定 --advance-source-sha 时必须同时指定 --source-data-hash"
+            )
+        advance_release_source_sha(
+            cfg,
+            args.advance_source_sha,
+            args.source_data_hash,
+        )
+        print(f"✅ 数据未变化，已推进上游版本 {args.advance_source_sha}")
+        return
+
+    if args.initialize_source_sha:
+        if not args.source_data_hash:
+            raise ValueError(
+                "指定 --initialize-source-sha 时必须同时指定 "
+                "--source-data-hash"
+            )
+        initialize_release_source_data_hash(
+            cfg,
+            args.initialize_source_sha,
+            args.source_data_hash,
+        )
+        print(f"✅ 已初始化源数据哈希 {args.initialize_source_sha}")
+        return
+
     if args.activate_source_sha:
         activate_release(cfg, args.activate_source_sha)
         print(f"✅ 已激活数据版本 {args.activate_source_sha}")
@@ -507,11 +629,15 @@ def main():
 
     release_metadata = None
     if args.source_sha:
-        if not args.data_hash:
-            raise ValueError("指定 --source-sha 时必须同时指定 --data-hash")
+        if not args.data_hash or not args.source_data_hash:
+            raise ValueError(
+                "指定 --source-sha 时必须同时指定 "
+                "--data-hash 和 --source-data-hash"
+            )
         release_metadata = {
             "source_sha": args.source_sha,
             "data_hash": args.data_hash,
+            "source_data_hash": args.source_data_hash,
             "worker_version": args.worker_version,
             "run_url": args.run_url,
         }
