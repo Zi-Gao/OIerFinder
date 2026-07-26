@@ -12,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
-import { LayoutGrid, Braces, UserCircle, Code2, ExternalLink, Moon, Sun, Settings2 } from "lucide-react";
+import { LayoutGrid, Braces, UserCircle, BookOpen, Code2, ExternalLink, Moon, Sun, Settings2 } from "lucide-react";
 import logo from './logo.svg';
 import BannerCard from './components/BannerCard';
 import InteractiveBackground from './components/InteractiveBackground';
@@ -322,6 +322,15 @@ function App() {
             <div className="grid grid-cols-2 gap-x-12 gap-y-6 w-full md:w-auto">
               <div className="flex flex-col gap-3">
                 <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Resources</span>
+                <a
+                  href="/docs"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 text-xs font-bold text-muted-foreground hover:text-primary transition-colors group"
+                >
+                  <BookOpen className="size-4 opacity-60 group-hover:opacity-100" />
+                  API Documentation
+                </a>
                 <a 
                   href="https://github.com/Zi-Gao/OIerFinder" 
                   target="_blank" 
