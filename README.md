@@ -114,13 +114,10 @@ python oierfinder.py -c sample_config.yml
 - `CLOUDFLARE_D1_API_TOKEN`：仅授予目标账号的 D1 写权限
 - `CLOUDFLARE_WORKERS_API_TOKEN`：使用 Cloudflare 的 Edit Workers 模板并限制到目标账号
 
-可以额外配置 Repository Variable
-`OIERFINDER_PRODUCTION_URL`；未配置时默认使用 `https://of.zigao.ac`。
-
 首次运行会应用 D1 migrations 并创建 `DataRelease` 表。流水线依次执行数据生成、
-完整性检查、Worker 测试与构建、Worker 部署、D1 暂存上传与事务切换、线上冒烟测试，
-最后才把对应上游 SHA 标记为 active。生成的 SQLite、统计 JSON 和发布清单会作为
-GitHub Actions artifact 保留 14 天。
+完整性检查、Worker 测试与构建、Worker 部署、D1 暂存上传与事务切换，最后把对应
+上游 SHA 标记为 active。生成的 SQLite、统计 JSON 和发布清单会作为 GitHub Actions
+artifact 保留 14 天。
 
 ## 数据声明与致谢
 
