@@ -1,3 +1,4 @@
+import argparse
 import math
 import os
 import sqlite3
@@ -112,11 +113,69 @@ STAGING_SCHEMA = {
     """,
 }
 
+RELEASE_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS DataRelease (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        upstream_sha TEXT NOT NULL,
+        data_hash TEXT NOT NULL,
+        worker_version TEXT,
+        status TEXT NOT NULL,
+        oier_count INTEGER NOT NULL,
+        contest_count INTEGER NOT NULL,
+        school_count INTEGER NOT NULL,
+        record_count INTEGER NOT NULL,
+        github_run_url TEXT,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        activated_at TEXT
+    )
+"""
+
 
 def load_config():
     config_path = os.path.join(os.path.dirname(__file__), "config.yml")
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    if os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    else:
+        cfg = {}
+
+    cloudflare = cfg.setdefault("cloudflare", {})
+    database = cfg.setdefault("database", {})
+    settings = cfg.setdefault("settings", {})
+
+    environment_overrides = {
+        "account_id": os.environ.get("CLOUDFLARE_ACCOUNT_ID"),
+        "database_id": os.environ.get("CLOUDFLARE_DATABASE_ID"),
+        "api_token": (
+            os.environ.get("CLOUDFLARE_D1_API_TOKEN")
+            or os.environ.get("CLOUDFLARE_API_TOKEN")
+        ),
+    }
+    for key, value in environment_overrides.items():
+        if value:
+            cloudflare[key] = value
+
+    if os.environ.get("OIER_DATABASE_PATH"):
+        database["local_path"] = os.environ["OIER_DATABASE_PATH"]
+    database.setdefault("local_path", "../../oier_data.db")
+
+    if os.environ.get("D1_BATCH_SIZE"):
+        settings["batch_size"] = int(os.environ["D1_BATCH_SIZE"])
+    settings.setdefault("batch_size", 5000)
+
+    missing_cloudflare_values = [
+        key
+        for key in ("account_id", "database_id", "api_token")
+        if not cloudflare.get(key)
+    ]
+    if missing_cloudflare_values:
+        raise RuntimeError(
+            "缺少 Cloudflare 配置: "
+            + ", ".join(missing_cloudflare_values)
+            + "。请设置环境变量或 cloudflare/script/config.yml。"
+        )
+
+    return cfg
 
 
 def _d1_url(cfg, endpoint):
@@ -197,6 +256,56 @@ def validate_local_database(connection):
 
 def ensure_remote_schema(cfg):
     execute_d1_batch(cfg, [CORE_SCHEMA[table_name] for table_name, _ in TABLES])
+    execute_d1_sql(cfg, RELEASE_SCHEMA)
+
+
+def get_release(cfg):
+    execute_d1_sql(cfg, RELEASE_SCHEMA)
+    data = _execute_d1_request(
+        cfg,
+        "query",
+        {
+            "sql": (
+                "SELECT upstream_sha, data_hash, worker_version, status, "
+                "oier_count, contest_count, school_count, record_count, "
+                "github_run_url, updated_at, activated_at "
+                "FROM DataRelease WHERE id = 1"
+            )
+        },
+    )
+    results = data["result"][0].get("results", [])
+    return results[0] if results else None
+
+
+def get_active_release_sha(cfg):
+    release = get_release(cfg)
+    if not release or release.get("status") != "active":
+        return ""
+    return release.get("upstream_sha", "")
+
+
+def activate_release(cfg, source_sha):
+    execute_d1_batch(
+        cfg,
+        [
+            {
+                "sql": (
+                    "UPDATE DataRelease "
+                    "SET status = 'active', activated_at = CURRENT_TIMESTAMP, "
+                    "updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = 1 AND upstream_sha = ?1"
+                ),
+                "params": [source_sha],
+            }
+        ],
+    )
+    release = get_release(cfg)
+    if (
+        not release
+        or release.get("upstream_sha") != source_sha
+        or release.get("status") != "active"
+    ):
+        raise RuntimeError("无法激活指定的数据发布版本")
 
 
 def prepare_staging_tables(cfg):
@@ -277,7 +386,7 @@ def verify_staging_tables(cfg, expected_counts):
             )
 
 
-def promote_staging_tables(cfg):
+def promote_staging_tables(cfg, expected_counts, release_metadata=None):
     statements = []
     for table_name, _ in reversed(TABLES):
         statements.append(f"DELETE FROM {table_name}")
@@ -287,6 +396,44 @@ def promote_staging_tables(cfg):
             f"INSERT INTO {table_name} ({column_list}) "
             f"SELECT {column_list} FROM {table_name}{STAGING_SUFFIX}"
         )
+    if release_metadata:
+        statements.append(
+            {
+                "sql": """
+                    INSERT INTO DataRelease (
+                        id, upstream_sha, data_hash, worker_version, status,
+                        oier_count, contest_count, school_count, record_count,
+                        github_run_url, updated_at, activated_at
+                    )
+                    VALUES (
+                        1, ?1, ?2, ?3, 'promoted',
+                        ?4, ?5, ?6, ?7, ?8, CURRENT_TIMESTAMP, NULL
+                    )
+                    ON CONFLICT(id) DO UPDATE SET
+                        upstream_sha = excluded.upstream_sha,
+                        data_hash = excluded.data_hash,
+                        worker_version = excluded.worker_version,
+                        status = excluded.status,
+                        oier_count = excluded.oier_count,
+                        contest_count = excluded.contest_count,
+                        school_count = excluded.school_count,
+                        record_count = excluded.record_count,
+                        github_run_url = excluded.github_run_url,
+                        updated_at = CURRENT_TIMESTAMP,
+                        activated_at = NULL
+                """,
+                "params": [
+                    release_metadata["source_sha"],
+                    release_metadata["data_hash"],
+                    release_metadata.get("worker_version"),
+                    expected_counts["OIer"],
+                    expected_counts["Contest"],
+                    expected_counts["School"],
+                    expected_counts["Record"],
+                    release_metadata.get("run_url"),
+                ],
+            }
+        )
     for table_name, _ in reversed(TABLES):
         statements.append(f"DROP TABLE {table_name}{STAGING_SUFFIX}")
 
@@ -294,8 +441,7 @@ def promote_staging_tables(cfg):
     execute_d1_batch(cfg, statements)
 
 
-def main():
-    cfg = load_config()
+def upload_database(cfg, release_metadata=None):
     db_path = cfg["database"]["local_path"]
     if not os.path.isabs(db_path):
         db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), db_path))
@@ -320,11 +466,57 @@ def main():
         verify_staging_tables(cfg, expected_counts)
 
         print("🔄 正在以事务方式替换生产数据...")
-        promote_staging_tables(cfg)
+        promote_staging_tables(cfg, expected_counts, release_metadata)
     finally:
         connection.close()
 
     print("🎉 全部上传并原子替换完成")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="安全更新 Cloudflare D1 核心数据")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--print-active-sha",
+        action="store_true",
+        help="打印当前已激活的上游提交 SHA",
+    )
+    mode.add_argument(
+        "--activate-source-sha",
+        help="将已完成冒烟测试的上游提交标记为 active",
+    )
+    parser.add_argument("--source-sha", help="本次数据对应的上游提交 SHA")
+    parser.add_argument("--data-hash", help="本次数据构建产物的 SHA-256")
+    parser.add_argument("--worker-version", help="本次部署的 Worker 版本")
+    parser.add_argument("--run-url", help="触发本次发布的 GitHub Actions 地址")
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    cfg = load_config()
+
+    if args.print_active_sha:
+        print(get_active_release_sha(cfg))
+        return
+
+    if args.activate_source_sha:
+        activate_release(cfg, args.activate_source_sha)
+        print(f"✅ 已激活数据版本 {args.activate_source_sha}")
+        return
+
+    release_metadata = None
+    if args.source_sha:
+        if not args.data_hash:
+            raise ValueError("指定 --source-sha 时必须同时指定 --data-hash")
+        release_metadata = {
+            "source_sha": args.source_sha,
+            "data_hash": args.data_hash,
+            "worker_version": args.worker_version,
+            "run_url": args.run_url,
+        }
+
+    upload_database(cfg, release_metadata)
 
 
 if __name__ == "__main__":

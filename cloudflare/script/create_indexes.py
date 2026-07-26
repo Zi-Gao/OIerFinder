@@ -1,52 +1,8 @@
-# create_indexes.py
-import requests
-import yaml
-import json
-import os
 import sys
-def load_config():
-    """读取配置文件"""
-    config_path = os.path.join(os.path.dirname(__file__), "config.yml")
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-def execute_d1_sql(cfg, sql):
-    """执行 SQL 到 Cloudflare D1"""
-    account_id = cfg['cloudflare']['account_id']
-    database_id = cfg['cloudflare']['database_id']
-    api_token = cfg['cloudflare']['api_token']
-    url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/d1/database/{database_id}/raw"
-    headers = {
-        "Authorization": f"Bearer {api_token}",
-        "Content-Type": "application/json"
-    }
-    payload = { "sql": sql }
-    try:
-        resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=60)
-        resp.raise_for_status() # 如果状态码不是 2xx，则抛出异常
-    except requests.exceptions.RequestException as e:
-        print(f"❌ API 请求失败: {e}")
-        return False
-    try:
-        data = resp.json()
-    except requests.exceptions.JSONDecodeError as e:
-        print(f"❌ API 返回了无效 JSON: {e}")
-        return False
 
-    if not data.get("success", False):
-        print(f"❌ SQL 执行失败: {data.get('errors', data)}")
-        return False
+from upload_to_d1 import execute_d1_sql, load_config
 
-    results = data.get("result")
-    if not isinstance(results, list) or not results:
-        print(f"❌ SQL 执行结果为空或格式无效: {data}")
-        return False
 
-    all_success = True
-    for result in results:
-        if not result.get("success", False):
-            print(f"❌ SQL 语句执行失败: {result}")
-            all_success = False
-    return all_success
 def main():
     """主函数，创建所有必要的索引"""
     try:
@@ -108,11 +64,15 @@ def main():
     DROP INDEX IF EXISTS idx_record_query;
     """
     print("执行以下SQL语句:\n" + "="*30 + index_sql + "="*30)
-    if execute_d1_sql(cfg, index_sql):
+    try:
+        execute_d1_sql(cfg, index_sql)
+    except Exception as e:
+        print(f"\n⚠ 索引创建过程中出现错误: {e}")
+        return False
+    else:
         print("\n✅ 所有索引成功创建或已存在。")
         return True
-    else:
-        print("\n⚠ 索引创建过程中出现错误，请检查上面的日志。")
-        return False
+
+
 if __name__ == "__main__":
     sys.exit(0 if main() else 1)
