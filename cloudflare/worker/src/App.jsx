@@ -3,7 +3,8 @@ import QueryBuilder from './components/QueryBuilder';
 import JsonQuery from './components/JsonQuery';
 import LuoguQuery from './components/LuoguQuery';
 import ResultsDisplay from './components/ResultsDisplay';
-import { searchOiers } from './api/client';
+import VersionBadge from './components/VersionBadge';
+import { getVersionInfo, searchOiers } from './api/client';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
-import { LayoutGrid, Braces, UserCircle, Code2, ExternalLink, Cloud, Moon, Sun, Settings2 } from "lucide-react";
+import { LayoutGrid, Braces, UserCircle, Code2, ExternalLink, Moon, Sun, Settings2 } from "lucide-react";
 import logo from './logo.svg';
 import BannerCard from './components/BannerCard';
 import InteractiveBackground from './components/InteractiveBackground';
@@ -41,6 +42,7 @@ function App() {
   const [activeTab, setActiveTab] = useState(TABS.BUILDER);
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [versionInfo, setVersionInfo] = useState(null);
 
   // --- 共享的查询状态 ---
   const [recordFilters, setRecordFilters] = useState([{}]);
@@ -73,6 +75,22 @@ function App() {
   useEffect(() => {
     localStorage.setItem('oierFinderLimit', limit);
   }, [limit]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getVersionInfo()
+      .then((data) => {
+        if (!cancelled) setVersionInfo(data);
+      })
+      .catch(() => {
+        if (!cancelled) setVersionInfo({});
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // --- 核心搜索函数 ---
   const handleSearch = async (currentRecordFilters, currentOierFilters, currentLimit = limit) => {
@@ -333,11 +351,17 @@ function App() {
             <p className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-[0.2em]">
               © {new Date().getFullYear()} OIerFinder Engine. No rights reserved.
             </p>
-            <div className="flex items-center gap-6">
-               <span className="text-[9px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-400 flex items-center gap-1.5 bg-blue-50 dark:bg-blue-950/30 px-2.5 py-1 rounded-md border border-blue-100 dark:border-blue-900/50 shadow-sm">
-                 <Cloud className="size-3" />
-                 Build: CF-PROD-2026.05
-               </span>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <VersionBadge
+                label="OIerFinder"
+                sha={versionInfo?.oierfinder_sha}
+                repositoryUrl="https://github.com/Zi-Gao/OIerFinder"
+              />
+              <VersionBadge
+                label="OIerDB-data"
+                sha={versionInfo?.oierdb_data_sha}
+                repositoryUrl="https://github.com/OIerDb-ng/OIerDb-data-generator"
+              />
             </div>
           </div>
         </div>

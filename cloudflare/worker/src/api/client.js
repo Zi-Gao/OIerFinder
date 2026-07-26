@@ -26,6 +26,14 @@ export const searchOiers = async (payload, adminSecret) => {
   return response.json();
 };
 
+export const getVersionInfo = async () => {
+  const response = await fetch('/version');
+  if (!response.ok) {
+    throw new Error(`Version API Error (${response.status})`);
+  }
+  return response.json();
+};
+
 export const getLuoguPrizes = async (uid, adminSecret) => {
   const response = await fetch(`/luogu/prizes?uid=${uid}&sync=1`, {
     headers: getHeaders(adminSecret),

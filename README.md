@@ -104,8 +104,9 @@ python oierfinder.py -c sample_config.yml
 
 工作流 [`.github/workflows/sync-oier-data.yml`](.github/workflows/sync-oier-data.yml)
 每 6 小时检查一次 `oierdb-data` 上游默认分支，也支持从 Actions 页面手动运行。
-上游 SHA 变化时会自动发布；本仓库的部署相关文件发生变更，或手动选择强制发布时，
-也会使用已锁定的上游版本重新构建和部署。
+上游 SHA 变化或手动选择强制数据更新时，会重新生成完整数据并发布 Worker；本仓库的
+部署相关文件发生变更时，仍会测试并发布 Worker、应用 migrations 和索引，但如果上游
+SHA 未变化，不会重新生成数据库，也不会替换 D1 中的核心数据。
 
 在 GitHub 仓库中创建名为 `production` 的 Environment，并配置以下 Secrets：
 
@@ -117,7 +118,9 @@ python oierfinder.py -c sample_config.yml
 首次运行会应用 D1 migrations 并创建 `DataRelease` 表。流水线依次执行数据生成、
 完整性检查、Worker 测试与构建、Worker 部署、D1 暂存上传与事务切换，最后把对应
 上游 SHA 标记为 active。生成的 SQLite、统计 JSON 和发布清单会作为 GitHub Actions
-artifact 保留 14 天。
+artifact 保留 14 天。当前数据发布使用完整快照而不是逐行增量；这是因为上游的学校、
+比赛和记录 ID 依赖生成顺序，并非稳定业务主键。SHA 检测保证未变化的数据不会重复
+上传，而发生变化时仍通过完整暂存和事务切换保证关联关系一致。
 
 ## 数据声明与致谢
 
