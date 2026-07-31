@@ -1,139 +1,224 @@
 # OIerFinder
 
-OIerFinder 是一个基于 [OIerDb-ng](https://github.com/OIerDb-ng/OIerDb-data-generator) 数据源的选手信息查询与筛选工具。本项目提供了一套完整的流水线，涵盖了从原始数据同步、本地数据库构建、多维度筛选引擎到云端（Cloudflare）部署的全过程。
+OIerFinder 是一个基于
+[OIerDb-data-generator](https://github.com/OIerDb-ng/OIerDb-data-generator)
+公开数据的 OI 选手信息查询与复合筛选工具。项目同时提供本地查询工具和部署在
+Cloudflare Workers + D1 上的 Web 应用。
 
-## 核心功能
+- 在线站点：[https://of.zigao.ac](https://of.zigao.ac)
+- API 文档：[https://of.zigao.ac/docs](https://of.zigao.ac/docs)
+- OpenAPI 3.1：[https://of.zigao.ac/openapi.json](https://of.zigao.ac/openapi.json)
 
-- **多维筛选引擎**：支持基于 YAML 配置的复合条件查询，能够根据姓名、性别、年级、省份、获奖等级、分数排名及 DB 评分进行精准筛选。
-- **关联记录匹配**：支持跨比赛筛选，例如“寻找在 2023 年获得过 NOI 金牌且在 2021 年获得过 NOIP 一等奖的选手”。
-- **本地 Web 界面**：基于 Flask 的交互式查询页面，提供直观的搜索体验。
-- **洛谷（Luogu）集成**：
-    - 支持爬取洛谷奖项认证数据。
-    - 提供转换工具，可将洛谷网页复制的奖项文本一键生成查询配置文件。
-- **数据统计分析**：内置脚本可生成比赛统计 JSON，支持可视化展示参赛趋势与省份分布。
-- **云原生部署**：完整的 Cloudflare Workers + D1 数据库部署方案，前端采用 React + Vite + Shadcn UI 构建。
+## 功能
+
+- 按比赛类型、年份、奖项等级、省份、学校、分数和排名组合筛选选手。
+- 支持多条获奖条件取交集，例如查询“2023 年 NOI 金牌且 2021 年 NOIP
+  一等奖”的选手。
+- 按姓名首字母、性别和初中入学年份进一步筛选。
+- 提供 React Web 界面、YAML 命令行查询和本地 Flask 页面。
+- 查询并同步公开的洛谷奖项认证，将 NOI 系列奖项转换为查询条件。
+- 自动跟踪上游数据内容，在内容未变化时避免重建和重写 D1。
+- 对外提供 OpenAPI 3.1 契约和 Scalar 交互式 API 文档。
+
+## 架构
+
+| 组件 | 技术 | 位置 |
+| --- | --- | --- |
+| 在线前端 | React、Vite、Tailwind CSS | `cloudflare/worker/src/` |
+| HTTP API | Hono、Cloudflare Workers | `cloudflare/worker/api/` |
+| 云端数据库 | Cloudflare D1 | `cloudflare/migrations/` |
+| 本地查询 | Python、SQLite、Flask | 仓库根目录、`utils/` |
+| 上游数据 | Git submodule | `oierdb-data/` |
+| 自动部署 | GitHub Actions | `.github/workflows/sync-oier-data.yml` |
 
 ## 快速开始
 
-### 1. 环境准备
+### 环境要求
 
-确保已安装 Python 3.10+，并执行以下命令初始化项目：
+- Git
+- Python 3.10+
+- [uv](https://docs.astral.sh/uv/)
+- Node.js 22+（仅开发 Cloudflare Worker 时需要）
+
+### 安装
 
 ```bash
-# 克隆项目及子仓库
-git clone --recursive https://github.com/your-repo/OIerFinder.git
+git clone --recursive https://github.com/Zi-Gao/OIerFinder.git
 cd OIerFinder
-
-# 安装依赖
-pip install -r requirements.txt
+uv sync --locked
 ```
 
-### 2. 数据处理流水线
+如果克隆时没有获取子模块：
 
-本项目的数据依赖于 `oierdb-data` 子项目，需手动触发数据生成流程：
-
-1. **生成原始数据**：
-   ```bash
-   cd oierdb-data
-   python main.py
-   cd ..
-   ```
-2. **构建 SQLite 数据库**：
-   ```bash
-   python create_db.py
-   ```
-   该操作会读取 `oierdb-data/dist` 下的 JSON 与文本数据，生成仅供本地查询使用且不会
-   纳入 Git 的运行时数据库 `oier_data.db`。
-
----
-
-## 使用指南
-
-### 1. 本地 Web 查询
-启动 Flask 服务器以开启可视化搜索界面：
 ```bash
-python app.py
+git submodule update --init --recursive
 ```
-默认访问地址：`http://127.0.0.1:5000`
 
-### 2. 命令行查询 (CLI)
-通过编写 YAML 配置文件进行复杂逻辑筛选：
+### 生成本地数据库
+
+先运行上游生成器，再构建 SQLite：
+
 ```bash
-python oierfinder.py -c sample_config.yml
+(cd oierdb-data && ../.venv/bin/python main.py)
+uv run python create_db.py
 ```
-配置文件支持设置入学年份区间、年级范围以及多组独立的记录过滤条件。
 
-### 3. 洛谷工具集
-- **奖项认证转换**：将洛谷个人主页的奖项认证文本存入 `awards.txt`，运行以下命令生成配置：
-  ```bash
-  python luogu2yml.py -i awards.txt -o config.yml
-  ```
-- **Top 1000 爬取**：
-  ```bash
-  python luogu_top1000.py
-  ```
+生成的 `oier_data.db` 仅供本地运行使用，已被 Git 忽略。可以通过
+`OIER_DATABASE_PATH` 指定其他输出位置：
 
----
+```bash
+OIER_DATABASE_PATH=/tmp/oier_data.db uv run python create_db.py
+```
 
-## 云端部署 (Cloudflare Stack)
+## 本地使用
 
-项目支持在 Cloudflare 生态中部署高性能的公共查询服务，相关代码位于 `cloudflare/` 目录下：
+### 命令行查询
 
-- **Worker API**: 处理 D1 数据库查询逻辑（`cloudflare/worker/api`）。
-- **D1 Database**: 存储结构化选手数据。
-- **Frontend**: 基于 React 的现代化单页应用（`cloudflare/worker/src`）。
+复制并修改 [sample_config.yml](sample_config.yml)，然后执行：
 
-部署后可通过 `/docs` 查看并在线调试 API，通过 `/openapi.json` 获取 OpenAPI 3.1
-机器可读契约。接口结构、参数限制、响应模型和洛谷同步的写入副作用均以该契约为准。
-修改 Worker API 时，`npm test` 会自动校验 OpenAPI 文档格式以及业务路由覆盖情况。
+```bash
+uv run python oierfinder.py --config sample_config.yml
+```
 
-### 部署流程简述：
-1. **自动化一键部署**：
-   项目提供 `update_cloudflare.py` 脚本，可一键完成子仓库更新、数据生成、统计计算、D1 同步及 Worker 部署：
-   ```bash
-   python update_cloudflare.py
-   ```
-2. **手动分步部署**：
-   - **生成统计 JSON**：
-     ```bash
-     python calculate_stats.py --db oier_data.db --output cloudflare/worker/api/contest_stats.json
-     ```
-   - **数据同步**：使用 `cloudflare/script/upload_to_d1.py` 将本地数据库上传至 Cloudflare D1。
-   - **发布应用**：
-     ```bash
-     cd cloudflare/worker
-     npm run deploy
-     ```
+`records` 中的每个条件组都必须由同一名选手的某条记录满足，多个条件组之间为 AND
+关系。
 
-### GitHub Actions 自动同步
+### Flask 页面
 
-工作流 [`.github/workflows/sync-oier-data.yml`](.github/workflows/sync-oier-data.yml)
-每 6 小时检查一次 `oierdb-data` 上游默认分支，也支持从 Actions 页面手动运行。
-上游 SHA 变化或手动选择强制数据更新时，会先运行上游生成器，再对生成的
-`result.txt` 和规范化后的 `static.json` 计算 `source_data_hash`。只有数据内容发生变化
-或手动强制更新时，才会构建 SQLite、发布 Worker 并替换 D1 核心数据；如果只有上游
-提交发生变化，工作流仅推进 `DataRelease.upstream_sha`。本仓库部署相关文件发生变更时，
-仍会测试并发布 Worker、应用 migrations 和索引，但不会因此替换核心数据。
+确保仓库根目录存在 `oier_data.db`，然后运行：
 
-在 GitHub 仓库中创建名为 `production` 的 Environment，并配置以下 Secrets：
+```bash
+uv run python app.py
+```
 
-- `CLOUDFLARE_ACCOUNT_ID`
-- `CLOUDFLARE_DATABASE_ID`
-- `CLOUDFLARE_D1_API_TOKEN`：仅授予目标账号的 D1 写权限
-- `CLOUDFLARE_WORKERS_API_TOKEN`：使用 Cloudflare 的 Edit Workers 模板并限制到目标账号
+默认访问 `http://127.0.0.1:5000`。
 
-首次运行会应用 D1 migrations 并创建 `DataRelease` 表。流水线依次执行数据生成、
-完整性检查、Worker 测试与构建、Worker 部署、D1 暂存上传与事务切换，最后把对应
-上游 SHA 标记为 active。SQLite 只存在于 Runner 临时目录并在结束时删除；统计 JSON
-和发布清单会作为 GitHub Actions artifact 保留 14 天。当前数据发布使用完整快照而
-不是逐行增量；这是因为上游的学校、
-比赛和记录 ID 依赖生成顺序，并非稳定业务主键。`source_data_hash` 内容检测保证未变化
-的数据不会重复构建和上传，而发生变化时仍通过完整暂存和事务切换保证关联关系一致；
-升级后的首次运行会为相同 active 上游版本补写该字段，不会因此重写核心数据。
+### 洛谷奖项文本转换
 
-## 数据声明与致谢
+```bash
+uv run python luogu2yml.py \
+  --input sample_luogu_awards.txt \
+  --output config.yml
+```
 
-- **数据来源**：本项目核心数据源自 [OIerDb-ng/OIerDb-data-generator](https://github.com/OIerDb-ng/OIerDb-data-generator)。
-- **隐私提醒**：选手信息仅供个人学习与学术研究使用，请务必遵守相关法律法规，尊重选手的个人隐私。
+生成的 YAML 可以直接交给本地命令行查询工具使用。
 
----
+## Cloudflare Worker 开发
+
+```bash
+cd cloudflare/worker
+npm ci
+npm run dev
+```
+
+常用检查：
+
+```bash
+npm test
+npm run lint
+npm run build
+```
+
+`npm test` 除了覆盖查询逻辑，还会校验 OpenAPI 3.1 文档，并确保每个实际注册的业务
+路由都出现在 API 契约中。
+
+### API
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `POST` | `/query-oier` | 按记录和选手属性筛选 |
+| `GET` | `/luogu/to_query` | 将洛谷奖项转换为查询条件 |
+| `GET` | `/luogu/prizes` | 查询或同步洛谷奖项 |
+| `GET` | `/version` | 查看应用与 active 上游数据 SHA |
+| `GET` | `/openapi.json` | 获取 OpenAPI 3.1 契约 |
+| `GET` | `/docs` | 打开 Scalar API 文档 |
+
+所有业务接口都可以匿名调用。配置可选的 `X-Admin-Secret` 后，管理员请求可以放宽
+`/query-oier` 的部分资源限制，并在服务端错误响应中看到调试信息。不要在公开客户端
+中保存管理员密钥。
+
+洛谷接口在使用 `sync=true` 或 `sync=1` 时会从洛谷读取最新奖项并在后台增量写入
+D1。该同步是公开写操作；历史奖项不会因为洛谷当前页面缺失而删除。
+
+请求参数、响应模型、示例和错误码以
+[在线 API 文档](https://of.zigao.ac/docs) 为准。
+
+## 自动同步与部署
+
+工作流
+[`.github/workflows/sync-oier-data.yml`](.github/workflows/sync-oier-data.yml)
+在以下情况运行：
+
+- 每 6 小时检查一次上游默认分支。
+- 从 GitHub Actions 页面手动运行，可指定完整上游 SHA 或强制更新。
+- `main` 分支中的 Worker、迁移、数据脚本或工作流发生变化。
+
+### 数据变更判断
+
+工作流先比较上游 Git SHA。需要检查数据时，再对生成的 `result.txt` 和规范化后的
+`static.json` 计算 `source_data_hash`：
+
+| 情况 | 行为 |
+| --- | --- |
+| 上游 SHA 和数据内容都未变化 | 跳过数据构建与上传 |
+| 上游 SHA 变化，但数据内容未变化 | 只推进 active 上游 SHA |
+| 数据内容变化或手动强制更新 | 构建完整快照，暂存上传并事务切换 D1 |
+| 本仓库部署文件变化 | 测试并部署 Worker，不因此重写核心数据 |
+
+核心数据使用完整快照而不是逐行增量，因为学校、比赛和记录 ID 依赖上游生成顺序，
+不是稳定业务主键。洛谷奖项同步则使用增量插入与更新。
+
+SQLite 只存在于 GitHub Runner 的临时目录，并在工作流结束时删除。发布 artifact
+仅保留统计 JSON 和发布清单，不包含 `oier_data.db`。
+
+### GitHub Environment
+
+创建名为 `production` 的 Environment，并配置：
+
+| Secret | 用途 |
+| --- | --- |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 账号 ID |
+| `CLOUDFLARE_DATABASE_ID` | 目标 D1 数据库 ID |
+| `CLOUDFLARE_D1_API_TOKEN` | 仅用于 D1 读写 |
+| `CLOUDFLARE_WORKERS_API_TOKEN` | 构建并部署 Worker |
+
+建议按目标账号和资源限制 Token 权限。Worker 的可选 `ADMIN_SECRET` 应通过 Cloudflare
+Secret 单独配置，工作流部署使用 `--keep-vars` 保留现有变量与 Secret。
+
+### 手动部署
+
+`update_cloudflare.py` 会更新子模块、生成上游数据、在临时目录构建 SQLite、同步 D1、
+创建索引并部署 Worker。执行前需要准备 Cloudflare 环境变量并激活虚拟环境：
+
+```bash
+source .venv/bin/activate
+python update_cloudflare.py
+```
+
+生产环境优先使用 GitHub Actions，以保留可追踪的版本、数据哈希和运行记录。
+
+## 项目结构
+
+```text
+.
+├── .github/workflows/       # 自动同步与部署
+├── cloudflare/
+│   ├── migrations/          # D1 migrations
+│   ├── script/              # D1 上传、指纹和索引脚本
+│   └── worker/
+│       ├── api/             # Hono API 与 OpenAPI
+│       └── src/             # React 前端
+├── oierdb-data/             # 上游数据生成器子模块
+├── utils/                   # 本地查询与洛谷解析
+├── app.py                   # 本地 Flask 页面
+├── create_db.py             # SQLite 构建
+├── oierfinder.py            # YAML 命令行查询
+└── update_cloudflare.py     # 手动云端更新流程
+```
+
+## 数据与隐私
+
+核心数据来自
+[OIerDb-ng/OIerDb-data-generator](https://github.com/OIerDb-ng/OIerDb-data-generator)。
+项目仅聚合公开记录。使用、部署或再分发数据时，请遵守数据源要求、适用法律法规，并
+尊重选手隐私。
