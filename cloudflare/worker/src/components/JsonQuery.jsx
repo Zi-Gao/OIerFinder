@@ -72,12 +72,12 @@ function JsonQuery({
   };
 
   return (
-    <div className="space-y-3.5 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       <BannerCard
         icon={Code2}
         title="JSON Payload Editor"
         description="Edit the search structure directly with syntax highlighting & autocompletion."
-        contentClassName="p-3"
+        contentClassName="p-3.5 md:p-4"
       >
         <JsonEditor
           value={jsonString}
@@ -90,7 +90,6 @@ function JsonQuery({
         onClick={handleSubmit} 
         loading={loading} 
         label="Execute JSON Query"
-        className="mt-1"
       />
     </div>
   );

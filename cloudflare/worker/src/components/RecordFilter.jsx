@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,18 +41,17 @@ function RecordFilter({ filter, onChange, onRemove }) {
   };
 
   return (
-    <Card className="relative border-muted/50 shadow-sm hover:border-primary/20 transition-all duration-200 py-3.5 overflow-visible">
+    <div className="relative border border-muted/50 rounded-xl bg-card shadow-sm hover:border-primary/20 transition-all duration-200 p-3.5 md:p-4 overflow-visible">
       <Button 
         variant="outline" 
         size="icon" 
         onClick={onRemove}
-        className="absolute -top-3 -right-3 size-7 rounded-full bg-background shadow-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all border border-muted/50 z-50 active:scale-90"
+        className="absolute -top-2.5 -right-2.5 size-7 rounded-full bg-background shadow-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all border border-muted/50 z-50 active:scale-90"
       >
         <X className="size-3.5" />
       </Button>
 
-      <CardContent className="pt-0.5 pb-0.5 space-y-3.5">
-
+      <div className="space-y-3">
         {/* Basic Fields */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
           <div className="space-y-1">
@@ -109,22 +107,22 @@ function RecordFilter({ filter, onChange, onRemove }) {
         </div>
         
         {/* Advanced Toggle */}
-        <div className="flex justify-center pt-1">
+        <div className="flex justify-center pt-0.5">
           <Button 
             variant="ghost" 
             size="sm" 
             onClick={toggleAdvanced}
             className="h-7 text-xs font-bold uppercase tracking-widest text-muted-foreground/60 hover:text-primary gap-1.5"
           >
-            {showAdvanced ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+            {showAdvanced ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
             {showAdvanced ? 'Hide Options' : 'More Options'}
           </Button>
         </div>
 
         {/* Advanced Fields */}
         {showAdvanced && (
-          <div className="mt-3.5 pt-3.5 border-t border-muted/50 space-y-4 animate-fade-in">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-3.5">
+          <div className="mt-2.5 pt-3.5 border-t border-muted/50 space-y-3.5 animate-fade-in">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-3">
               
               <div className="sm:col-span-2 space-y-1">
                 <Label className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">
@@ -132,8 +130,8 @@ function RecordFilter({ filter, onChange, onRemove }) {
                   Year Range
                 </Label>
                 <div className="grid grid-cols-2 gap-3 items-center">
-                  <Input type="number" name="year_start" placeholder="From" value={filter.year_start ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
-                  <Input type="number" name="year_end" placeholder="To" value={filter.year_end ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
+                  <Input type="number" name="year_start" placeholder="From" value={filter.year_start ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9.5 text-sm" />
+                  <Input type="number" name="year_end" placeholder="To" value={filter.year_end ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9.5 text-sm" />
                 </div>
               </div>
 
@@ -142,7 +140,7 @@ function RecordFilter({ filter, onChange, onRemove }) {
                   <MapPin className="size-3" />
                   Provinces
                 </Label>
-                <Input type="text" name="provinces" placeholder="北京, 上海..." value={filter.provinces || ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
+                <Input type="text" name="provinces" placeholder="北京, 上海..." value={filter.provinces || ''} onChange={handleInputChange} className="bg-muted/20 h-9.5 text-sm" />
               </div>
 
               <div className="space-y-1">
@@ -151,8 +149,8 @@ function RecordFilter({ filter, onChange, onRemove }) {
                   Score Range
                 </Label>
                 <div className="grid grid-cols-2 gap-2.5">
-                  <Input type="number" name="min_score" placeholder="Min" value={filter.min_score ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
-                  <Input type="number" name="max_score" placeholder="Max" value={filter.max_score ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
+                  <Input type="number" name="min_score" placeholder="Min" value={filter.min_score ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9.5 text-sm" />
+                  <Input type="number" name="max_score" placeholder="Max" value={filter.max_score ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9.5 text-sm" />
                 </div>
               </div>
               
@@ -162,8 +160,8 @@ function RecordFilter({ filter, onChange, onRemove }) {
                   Rank Range
                 </Label>
                 <div className="grid grid-cols-2 gap-2.5">
-                  <Input type="number" name="min_rank" placeholder="Min" value={filter.min_rank ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
-                  <Input type="number" name="max_rank" placeholder="Max" value={filter.max_rank ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
+                  <Input type="number" name="min_rank" placeholder="Min" value={filter.min_rank ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9.5 text-sm" />
+                  <Input type="number" name="max_rank" placeholder="Max" value={filter.max_rank ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9.5 text-sm" />
                 </div>
               </div>
 
@@ -182,7 +180,7 @@ function RecordFilter({ filter, onChange, onRemove }) {
                   }
                   onValueChange={handleSemesterChange}
                 >
-                  <SelectTrigger className="bg-muted/20 h-9 text-sm">
+                  <SelectTrigger className="bg-muted/20 h-9.5 text-sm">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -200,24 +198,24 @@ function RecordFilter({ filter, onChange, onRemove }) {
                   <Calendar className="size-3" />
                   Specific Years List
                 </Label>
-                <Input type="text" name="years" placeholder="2020, 2022... (Overrides range)" value={filter.years || ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
+                <Input type="text" name="years" placeholder="2020, 2022... (Overrides range)" value={filter.years || ''} onChange={handleInputChange} className="bg-muted/20 h-9.5 text-sm" />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <Label className="text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">Contest IDs</Label>
-                  <Input type="text" name="contest_ids" placeholder="101, 102..." value={filter.contest_ids || ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
+                  <Input type="text" name="contest_ids" placeholder="101, 102..." value={filter.contest_ids || ''} onChange={handleInputChange} className="bg-muted/20 h-9.5 text-sm" />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">School IDs</Label>
-                  <Input type="text" name="school_ids" placeholder="233, 234..." value={filter.school_ids || ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
+                  <Input type="text" name="school_ids" placeholder="233, 234..." value={filter.school_ids || ''} onChange={handleInputChange} className="bg-muted/20 h-9.5 text-sm" />
                 </div>
               </div>
             </div>
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 

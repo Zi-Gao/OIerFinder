@@ -190,24 +190,24 @@ function App() {
             >
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="admin-secret" className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/60 ml-1">Admin Secret</Label>
+                  <Label htmlFor="admin-secret" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground/60 ml-1">Admin Secret</Label>
                   <Input
                     id="admin-secret"
                     type="password"
                     value={adminSecret}
                     onChange={(e) => setAdminSecret(e.target.value)}
                     placeholder="X-Admin-Secret"
-                    className="bg-muted/5 border-muted/40 h-9 shadow-sm focus:bg-background transition-colors text-sm"
+                    className="bg-muted/5 border-muted/40 h-9.5 shadow-sm focus:bg-background transition-colors text-sm"
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="global-limit" className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/60 ml-1">Result Limit</Label>
+                  <Label htmlFor="global-limit" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground/60 ml-1">Result Limit</Label>
                   <Input
                     id="global-limit"
                     type="number"
                     value={limit}
                     onChange={(e) => setLimit(Number(e.target.value) || 0)}
-                    className="bg-muted/5 border-muted/40 h-9 shadow-sm focus:bg-background transition-colors text-sm"
+                    className="bg-muted/5 border-muted/40 h-9.5 shadow-sm focus:bg-background transition-colors text-sm"
                   />
                 </div>
                 {mounted && (
@@ -231,9 +231,9 @@ function App() {
           </aside>
 
           {/* Main Area */}
-          <main className="lg:col-span-9 space-y-5.5">
+          <main className="lg:col-span-9 space-y-4">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="!w-full !h-11 p-1 bg-muted/40 border border-muted/40 flex items-center justify-between rounded-xl mb-1.5 shadow-sm">
+              <TabsList className="!w-full !h-11 p-1 bg-muted/40 border border-muted/40 flex items-center justify-between rounded-xl mb-4 shadow-sm">
                 <TabsTrigger 
                   value={TABS.BUILDER} 
                   className="flex-1 !h-full rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all duration-300 flex items-center justify-center gap-2 group border-none text-xs"

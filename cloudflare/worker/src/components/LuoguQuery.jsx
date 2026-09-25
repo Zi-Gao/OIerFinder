@@ -78,7 +78,7 @@ function LuoguQuery({ adminSecret, onImportQuery }) {
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row gap-3 items-end">
             <div className="flex-grow space-y-1.5">
-              <Label htmlFor="luogu-uid" className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 ml-1">Luogu User ID</Label>
+              <Label htmlFor="luogu-uid" className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80 ml-1">Luogu User ID</Label>
               <div className="relative">
                 <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground opacity-50" />
                 <Input

@@ -39,7 +39,7 @@ function QueryBuilder({
   };
 
   return (
-    <div className="space-y-3.5 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       {/* Record Conditions Card */}
       <BannerCard
         icon={Trophy}
@@ -50,7 +50,7 @@ function QueryBuilder({
             variant="outline" 
             size="sm" 
             onClick={addFilter}
-            className="h-7.5 gap-1.5 text-xs bg-background shadow-sm hover:shadow-md transition-all border-muted/50 font-bold"
+            className="h-7.5 px-3 gap-1.5 text-xs bg-background shadow-sm hover:shadow-md transition-all border-muted/50 font-bold"
           >
             <PlusCircle className="size-3.5" />
             Add Record
@@ -67,7 +67,7 @@ function QueryBuilder({
             />
           ))}
           {recordFilters.length === 0 && (
-            <div className="border border-dashed border-muted-foreground/30 rounded-xl py-8 flex flex-col items-center justify-center bg-muted/5">
+            <div className="border border-dashed border-muted-foreground/30 rounded-xl py-7 flex flex-col items-center justify-center bg-muted/5">
               <p className="text-xs text-muted-foreground mb-2.5 font-semibold uppercase tracking-wider opacity-60">No records added</p>
               <Button variant="outline" size="sm" onClick={addFilter} className="h-7.5 text-xs gap-1.5 shadow-sm border-muted/50">
                 <PlusCircle className="size-3.5" />
@@ -86,7 +86,7 @@ function QueryBuilder({
       >
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
           <div className="space-y-1">
-            <Label htmlFor="initials" className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 ml-1">Initials</Label>
+            <Label htmlFor="initials" className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80 ml-1">Initials</Label>
             <Input
               id="initials"
               placeholder="e.g., QZH, DMY"
@@ -97,7 +97,7 @@ function QueryBuilder({
           </div>
 
           <div className="space-y-1">
-            <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 ml-1">Gender</Label>
+            <Label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80 ml-1">Gender</Label>
             <Select 
               value={oierFilters.gender || 'any'} 
               onValueChange={(val) => handleOierFilterChange('gender', val === 'any' ? '' : val)}
@@ -114,7 +114,7 @@ function QueryBuilder({
           </div>
 
           <div className="space-y-1">
-            <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 ml-1">Enrollment Year</Label>
+            <Label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80 ml-1">Enrollment Year</Label>
             <div className="grid grid-cols-2 gap-2">
               <Input 
                 type="number" 
@@ -140,7 +140,6 @@ function QueryBuilder({
         onClick={handleLocalSearch} 
         loading={loading} 
         label="Execute Search"
-        className="mt-1"
       />
     </div>
   );

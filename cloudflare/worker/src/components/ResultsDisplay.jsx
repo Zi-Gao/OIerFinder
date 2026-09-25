@@ -76,7 +76,7 @@ function ResultsDisplay({ results, error, loading }) {
   };
 
   return (
-    <div className="space-y-4 animate-fade-in pt-2">
+    <div className="space-y-4 animate-fade-in">
         <BannerCard
           icon={Users}
           title="Search Results"
