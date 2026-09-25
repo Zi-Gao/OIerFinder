@@ -166,30 +166,30 @@ function App() {
       {/* Dynamic Interactive Background */}
       <InteractiveBackground />
 
-      <div className="container mx-auto py-16 px-4 md:px-8 max-w-7xl relative z-10 flex-grow">
-        <header className="flex flex-col items-center mb-16 animate-fade-in">
-          <div className="flex items-center gap-6">
-            <div className="size-20 relative group transition-transform hover:-rotate-3 duration-300">
+      <div className="container mx-auto py-10 md:py-12 px-4 md:px-6 max-w-7xl relative z-10 flex-grow">
+        <header className="flex flex-col items-center mb-10 md:mb-12 animate-fade-in">
+          <div className="flex items-center gap-4.5">
+            <div className="size-16 md:size-18 relative group transition-transform hover:-rotate-3 duration-300">
               <img src={logo} alt="OIerFinder Logo" className="w-full h-full bg-white shadow-2xl rounded-2xl border border-slate-200/50" />
             </div>
             <div className="flex flex-col">
-              <h1 className="text-5xl md:text-6xl font-black tracking-tighter text-slate-950 dark:text-slate-50">
+              <h1 className="text-4xl md:text-5xl lg:text-6xl font-black tracking-tighter text-slate-950 dark:text-slate-50">
                 OIer<span className="text-primary italic">Finder</span>
               </h1>
             </div>
           </div>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-7 items-start">
           {/* Sidebar */}
-          <aside className="lg:col-span-3 space-y-6">
+          <aside className="lg:col-span-3 space-y-4">
             <BannerCard
               icon={Settings2}
               title="Settings"
               description="Global configuration for search."
             >
-              <div className="space-y-4">
-                <div className="space-y-2">
+              <div className="space-y-3">
+                <div className="space-y-1.5">
                   <Label htmlFor="admin-secret" className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/60 ml-1">Admin Secret</Label>
                   <Input
                     id="admin-secret"
@@ -197,22 +197,22 @@ function App() {
                     value={adminSecret}
                     onChange={(e) => setAdminSecret(e.target.value)}
                     placeholder="X-Admin-Secret"
-                    className="bg-muted/5 border-muted/40 h-10 shadow-sm focus:bg-background transition-colors"
+                    className="bg-muted/5 border-muted/40 h-9 shadow-sm focus:bg-background transition-colors text-sm"
                   />
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <Label htmlFor="global-limit" className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/60 ml-1">Result Limit</Label>
                   <Input
                     id="global-limit"
                     type="number"
                     value={limit}
                     onChange={(e) => setLimit(Number(e.target.value) || 0)}
-                    className="bg-muted/5 border-muted/40 h-10 shadow-sm focus:bg-background transition-colors"
+                    className="bg-muted/5 border-muted/40 h-9 shadow-sm focus:bg-background transition-colors text-sm"
                   />
                 </div>
                 {mounted && (
-                  <div className="flex items-center justify-between pt-2 border-t border-muted/20">
-                    <div className="flex flex-col gap-1">
+                  <div className="flex items-center justify-between pt-2.5 mt-1 border-t border-muted/20">
+                    <div className="flex flex-col gap-0.5">
                       <Label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground/60 ml-1">Dark Mode</Label>
                       <span className="text-[10px] text-muted-foreground/40 ml-1">Toggle theme preference</span>
                     </div>
@@ -231,28 +231,28 @@ function App() {
           </aside>
 
           {/* Main Area */}
-          <main className="lg:col-span-9 space-y-8">
+          <main className="lg:col-span-9 space-y-5.5">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="!w-full !h-12 p-1 bg-muted/40 border border-muted/40 flex items-center justify-between rounded-2xl mb-2 shadow-sm">
+              <TabsList className="!w-full !h-11 p-1 bg-muted/40 border border-muted/40 flex items-center justify-between rounded-xl mb-1.5 shadow-sm">
                 <TabsTrigger 
                   value={TABS.BUILDER} 
-                  className="flex-1 !h-full rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all duration-300 flex items-center justify-center gap-2 group border-none"
+                  className="flex-1 !h-full rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all duration-300 flex items-center justify-center gap-2 group border-none text-xs"
                 >
-                  <LayoutGrid className="size-4 opacity-50 group-data-[state=active]:opacity-100 group-data-[state=active]:scale-110 transition-transform" />
+                  <LayoutGrid className="size-3.5 opacity-50 group-data-[state=active]:opacity-100 group-data-[state=active]:scale-110 transition-transform" />
                   <span className="font-extrabold tracking-tight">{TABS.BUILDER}</span>
                 </TabsTrigger>
                 <TabsTrigger 
                   value={TABS.JSON} 
-                  className="flex-1 !h-full rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all duration-300 flex items-center justify-center gap-2 group border-none"
+                  className="flex-1 !h-full rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all duration-300 flex items-center justify-center gap-2 group border-none text-xs"
                 >
-                  <Braces className="size-4 opacity-50 group-data-[state=active]:opacity-100 group-data-[state=active]:scale-110 transition-transform" />
+                  <Braces className="size-3.5 opacity-50 group-data-[state=active]:opacity-100 group-data-[state=active]:scale-110 transition-transform" />
                   <span className="font-extrabold tracking-tight">{TABS.JSON}</span>
                 </TabsTrigger>
                 <TabsTrigger 
                   value={TABS.LUOGU} 
-                  className="flex-1 !h-full rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all duration-300 flex items-center justify-center gap-2 group border-none"
+                  className="flex-1 !h-full rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all duration-300 flex items-center justify-center gap-2 group border-none text-xs"
                 >
-                  <UserCircle className="size-4 opacity-50 group-data-[state=active]:opacity-100 group-data-[state=active]:scale-110 transition-transform" />
+                  <UserCircle className="size-3.5 opacity-50 group-data-[state=active]:opacity-100 group-data-[state=active]:scale-110 transition-transform" />
                   <span className="font-extrabold tracking-tight">{TABS.LUOGU}</span>
                 </TabsTrigger>
               </TabsList>
@@ -296,19 +296,19 @@ function App() {
         </div>
       </div>
 
-      <footer className="relative z-10 border-t border-muted/80 bg-muted/30 backdrop-blur-sm py-16 mt-24">
+      <footer className="relative z-10 border-t border-muted/80 bg-muted/30 backdrop-blur-sm py-10 md:py-12 mt-16 md:mt-20">
         <div className="container mx-auto px-4 md:px-8 max-w-7xl">
-          <div className="flex flex-col md:flex-row justify-between items-start gap-12">
-            <div className="flex flex-col items-center md:items-start gap-4">
+          <div className="flex flex-col md:flex-row justify-between items-start gap-8">
+            <div className="flex flex-col items-center md:items-start gap-3">
               <div className="flex items-center gap-2.5 group cursor-default">
-                <div className="size-8 relative group-hover:rotate-6 transition-transform">
+                <div className="size-7 relative group-hover:rotate-6 transition-transform">
                   <img src={logo} alt="OIerFinder Logo" className="w-full h-full bg-white shadow-lg rounded-md border border-slate-200/50" />
                 </div>
-                <span className="text-lg font-black tracking-tighter text-slate-950 dark:text-slate-50">
+                <span className="text-base md:text-lg font-black tracking-tighter text-slate-950 dark:text-slate-50">
                   OIer<span className="text-primary italic">Finder</span>
                 </span>
               </div>
-              <div className="flex flex-col gap-2 max-w-md">
+              <div className="flex flex-col gap-1.5 max-w-md">
                 <p className="text-[11px] text-slate-600 dark:text-slate-400 font-bold uppercase tracking-widest flex items-center gap-2">
                   <span className="size-1.5 rounded-full bg-primary" />
                   Professional Search Infrastructure
@@ -319,8 +319,8 @@ function App() {
               </div>
             </div>
             
-            <div className="grid grid-cols-2 gap-x-12 gap-y-6 w-full md:w-auto">
-              <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-2 gap-x-10 gap-y-5 w-full md:w-auto">
+              <div className="flex flex-col gap-2.5">
                 <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Resources</span>
                 <a
                   href="/docs"
@@ -341,7 +341,7 @@ function App() {
                   GitHub Source
                 </a>
               </div>
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2.5">
                 <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Data Source</span>
                 <a 
                   href="https://oier.baoshuo.dev/" 
@@ -356,7 +356,7 @@ function App() {
             </div>
           </div>
           
-          <div className="mt-12 pt-8 border-t border-muted/30 flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="mt-8 pt-5 border-t border-muted/30 flex flex-col md:flex-row justify-between items-center gap-3">
             <p className="text-[10px] text-muted-foreground/50 font-medium uppercase tracking-[0.2em]">
               © {new Date().getFullYear()} OIerFinder Engine. No rights reserved.
             </p>

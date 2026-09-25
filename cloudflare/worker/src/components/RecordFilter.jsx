@@ -42,22 +42,22 @@ function RecordFilter({ filter, onChange, onRemove }) {
   };
 
   return (
-    <Card className="relative border-muted/50 shadow-sm hover:border-primary/20 transition-all duration-200 py-6 overflow-visible">
+    <Card className="relative border-muted/50 shadow-sm hover:border-primary/20 transition-all duration-200 py-3.5 overflow-visible">
       <Button 
         variant="outline" 
         size="icon" 
         onClick={onRemove}
-        className="absolute -top-3 -right-3 size-8 rounded-full bg-background shadow-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all border border-muted/50 z-50 active:scale-90"
+        className="absolute -top-3 -right-3 size-7 rounded-full bg-background shadow-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all border border-muted/50 z-50 active:scale-90"
       >
-        <X className="size-4" />
+        <X className="size-3.5" />
       </Button>
 
-      <CardContent className="pt-2 pb-2 space-y-6">
+      <CardContent className="pt-0.5 pb-0.5 space-y-3.5">
 
         {/* Basic Fields */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-          <div className="space-y-2">
-            <Label className="flex items-center gap-2 text-xs font-bold uppercase text-muted-foreground tracking-tight">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+          <div className="space-y-1">
+            <Label className="flex items-center gap-1.5 text-xs font-bold uppercase text-muted-foreground tracking-tight">
               <Trophy className="size-3.5" />
               Contest Type
             </Label>
@@ -65,7 +65,7 @@ function RecordFilter({ filter, onChange, onRemove }) {
               value={filter.contest_type || 'any'} 
               onValueChange={(val) => handleSelectChange('contest_type', val)}
             >
-              <SelectTrigger className="bg-muted/30 h-10">
+              <SelectTrigger className="bg-muted/30 h-9.5">
                 <SelectValue placeholder="Any" />
               </SelectTrigger>
               <SelectContent>
@@ -74,8 +74,8 @@ function RecordFilter({ filter, onChange, onRemove }) {
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label className="flex items-center gap-2 text-xs font-bold uppercase text-muted-foreground tracking-tight">
+          <div className="space-y-1">
+            <Label className="flex items-center gap-1.5 text-xs font-bold uppercase text-muted-foreground tracking-tight">
               <Trophy className="size-3.5" />
               Level
             </Label>
@@ -83,7 +83,7 @@ function RecordFilter({ filter, onChange, onRemove }) {
               value={filter.level || 'any'} 
               onValueChange={(val) => handleSelectChange('level', val)}
             >
-              <SelectTrigger className="bg-muted/30 h-10">
+              <SelectTrigger className="bg-muted/30 h-9.5">
                 <SelectValue placeholder="Any" />
               </SelectTrigger>
               <SelectContent>
@@ -92,8 +92,8 @@ function RecordFilter({ filter, onChange, onRemove }) {
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label className="flex items-center gap-2 text-xs font-bold uppercase text-muted-foreground tracking-tight">
+          <div className="space-y-1">
+            <Label className="flex items-center gap-1.5 text-xs font-bold uppercase text-muted-foreground tracking-tight">
               <Calendar className="size-3.5" />
               Year
             </Label>
@@ -103,18 +103,18 @@ function RecordFilter({ filter, onChange, onRemove }) {
               placeholder="e.g., 2023" 
               value={filter.year ?? ''}
               onChange={handleInputChange} 
-              className="bg-muted/30 h-10"
+              className="bg-muted/30 h-9.5"
             />
           </div>
         </div>
         
         {/* Advanced Toggle */}
-        <div className="flex justify-center -my-1">
+        <div className="flex justify-center pt-1">
           <Button 
             variant="ghost" 
             size="sm" 
             onClick={toggleAdvanced}
-            className="h-8 text-xs font-bold uppercase tracking-widest text-muted-foreground/60 hover:text-primary gap-1.5"
+            className="h-7 text-xs font-bold uppercase tracking-widest text-muted-foreground/60 hover:text-primary gap-1.5"
           >
             {showAdvanced ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
             {showAdvanced ? 'Hide Options' : 'More Options'}
@@ -123,52 +123,52 @@ function RecordFilter({ filter, onChange, onRemove }) {
 
         {/* Advanced Fields */}
         {showAdvanced && (
-          <div className="pt-6 border-t border-muted/50 space-y-8 animate-fade-in">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-6">
+          <div className="mt-3.5 pt-3.5 border-t border-muted/50 space-y-4 animate-fade-in">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-3.5">
               
-              <div className="sm:col-span-2 space-y-2">
-                <Label className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">
+              <div className="sm:col-span-2 space-y-1">
+                <Label className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">
                   <Calendar className="size-3" />
                   Year Range
                 </Label>
-                <div className="grid grid-cols-2 gap-4 items-center">
-                  <Input type="number" name="year_start" placeholder="From" value={filter.year_start ?? ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
-                  <Input type="number" name="year_end" placeholder="To" value={filter.year_end ?? ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
+                <div className="grid grid-cols-2 gap-3 items-center">
+                  <Input type="number" name="year_start" placeholder="From" value={filter.year_start ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
+                  <Input type="number" name="year_end" placeholder="To" value={filter.year_end ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">
+              <div className="space-y-1">
+                <Label className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">
                   <MapPin className="size-3" />
                   Provinces
                 </Label>
-                <Input type="text" name="provinces" placeholder="北京, 上海..." value={filter.provinces || ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
+                <Input type="text" name="provinces" placeholder="北京, 上海..." value={filter.provinces || ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
               </div>
 
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">
+              <div className="space-y-1">
+                <Label className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">
                   <Hash className="size-3" />
                   Score Range
                 </Label>
-                <div className="grid grid-cols-2 gap-3">
-                  <Input type="number" name="min_score" placeholder="Min" value={filter.min_score ?? ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
-                  <Input type="number" name="max_score" placeholder="Max" value={filter.max_score ?? ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
+                <div className="grid grid-cols-2 gap-2.5">
+                  <Input type="number" name="min_score" placeholder="Min" value={filter.min_score ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
+                  <Input type="number" name="max_score" placeholder="Max" value={filter.max_score ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
                 </div>
               </div>
               
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">
+              <div className="space-y-1">
+                <Label className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">
                   <Hash className="size-3" />
                   Rank Range
                 </Label>
-                <div className="grid grid-cols-2 gap-3">
-                  <Input type="number" name="min_rank" placeholder="Min" value={filter.min_rank ?? ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
-                  <Input type="number" name="max_rank" placeholder="Max" value={filter.max_rank ?? ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
+                <div className="grid grid-cols-2 gap-2.5">
+                  <Input type="number" name="min_rank" placeholder="Min" value={filter.min_rank ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
+                  <Input type="number" name="max_rank" placeholder="Max" value={filter.max_rank ?? ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">
+              <div className="space-y-1">
+                <Label className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">
                   <GraduationCap className="size-3" />
                   Academic Term
                 </Label>
@@ -182,7 +182,7 @@ function RecordFilter({ filter, onChange, onRemove }) {
                   }
                   onValueChange={handleSemesterChange}
                 >
-                  <SelectTrigger className="bg-muted/20 h-10 text-sm">
+                  <SelectTrigger className="bg-muted/20 h-9 text-sm">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -194,23 +194,23 @@ function RecordFilter({ filter, onChange, onRemove }) {
               </div>
             </div>
 
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">
                   <Calendar className="size-3" />
                   Specific Years List
                 </Label>
-                <Input type="text" name="years" placeholder="2020, 2022... (Overrides range)" value={filter.years || ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
+                <Input type="text" name="years" placeholder="2020, 2022... (Overrides range)" value={filter.years || ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div className="space-y-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
                   <Label className="text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">Contest IDs</Label>
-                  <Input type="text" name="contest_ids" placeholder="101, 102..." value={filter.contest_ids || ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
+                  <Input type="text" name="contest_ids" placeholder="101, 102..." value={filter.contest_ids || ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-1">
                   <Label className="text-[10px] uppercase tracking-widest font-black text-muted-foreground/70">School IDs</Label>
-                  <Input type="text" name="school_ids" placeholder="233, 234..." value={filter.school_ids || ''} onChange={handleInputChange} className="bg-muted/20 h-10 text-sm" />
+                  <Input type="text" name="school_ids" placeholder="233, 234..." value={filter.school_ids || ''} onChange={handleInputChange} className="bg-muted/20 h-9 text-sm" />
                 </div>
               </div>
             </div>

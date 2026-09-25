@@ -19,12 +19,12 @@ function ActionBar({
         onClick={onClick}
         disabled={loading}
         size="lg"
-        className="bg-slate-950 hover:bg-slate-800 text-white px-8 h-10 text-xs font-bold uppercase tracking-wider shadow-md rounded-xl transition-all hover:scale-[1.02] active:scale-95 border-none gap-2"
+        className="bg-slate-950 hover:bg-slate-800 text-white px-6.5 h-9.5 text-xs font-bold uppercase tracking-wider shadow-md rounded-xl transition-all hover:scale-[1.02] active:scale-95 border-none gap-2"
       >
         {loading ? (
-          <Loader2 className="size-4 animate-spin" />
+          <Loader2 className="size-3.5 animate-spin" />
         ) : (
-          <Icon className="size-4" />
+          <Icon className="size-3.5" />
         )}
         {loading ? "Processing..." : label}
       </Button>

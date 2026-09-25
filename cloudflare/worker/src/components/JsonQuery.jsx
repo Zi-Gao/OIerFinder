@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import BannerCard from './BannerCard';
 import ActionBar from './ActionBar';
+import JsonEditor from './JsonEditor';
 import { Code2 } from "lucide-react";
 
 function JsonQuery({ 
@@ -49,8 +50,7 @@ function JsonQuery({
     setJsonString(JSON.stringify(queryPayload, null, 2));
   }, [recordFilters, oierFilters, limit]);
   
-  const handleTextChange = (e) => {
-    const newJsonString = e.target.value;
+  const handleCodeChange = (newJsonString) => {
     setJsonString(newJsonString);
     try {
       const parsed = parsePayload(newJsonString);
@@ -72,19 +72,17 @@ function JsonQuery({
   };
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="space-y-3.5 animate-fade-in">
       <BannerCard
         icon={Code2}
         title="JSON Payload Editor"
-        description="Edit the search structure directly. Ensure valid JSON format."
-        contentClassName="p-0 relative group"
+        description="Edit the search structure directly with syntax highlighting & autocompletion."
+        contentClassName="p-3"
       >
-        <textarea
+        <JsonEditor
           value={jsonString}
-          onChange={handleTextChange}
+          onChange={handleCodeChange}
           rows={16}
-          spellCheck={false}
-          className="w-full p-6 bg-background text-primary font-mono text-sm leading-relaxed border-none focus:ring-0 focus:outline-none resize-none selection:bg-primary/10"
         />
       </BannerCard>
       
@@ -92,7 +90,7 @@ function JsonQuery({
         onClick={handleSubmit} 
         loading={loading} 
         label="Execute JSON Query"
-        className="mt-2"
+        className="mt-1"
       />
     </div>
   );

@@ -76,14 +76,14 @@ function ResultsDisplay({ results, error, loading }) {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in pt-4">
+    <div className="space-y-4 animate-fade-in pt-2">
         <BannerCard
           icon={Users}
           title="Search Results"
           description={`${results.data.length} programmers found matching your criteria.`}
           contentClassName="p-0"
           action={
-            <Badge variant="outline" className="bg-background text-primary border-muted/50 font-bold uppercase tracking-widest text-[9px] px-3">
+            <Badge variant="outline" className="bg-background text-primary border-muted/50 font-bold uppercase tracking-widest text-[9px] px-2.5">
               LIVE DATA
             </Badge>
           }
@@ -92,20 +92,20 @@ function ResultsDisplay({ results, error, loading }) {
             <Table>
                 <TableHeader className="bg-muted/20">
                     <TableRow className="hover:bg-transparent border-muted/30">
-                        <TableHead className="w-[80px] px-6 py-4 font-bold text-[10px] uppercase tracking-wider text-muted-foreground/80">UID</TableHead>
-                        <TableHead className="px-6 py-4 font-bold text-[10px] uppercase tracking-wider text-muted-foreground/80">Name</TableHead>
-                        <TableHead className="px-6 py-4 font-bold text-[10px] uppercase tracking-wider text-muted-foreground/80">Gender</TableHead>
-                        <TableHead className="px-6 py-4 font-bold text-[10px] uppercase tracking-wider text-muted-foreground/80">Enrollment</TableHead>
-                        <TableHead className="px-6 py-4 font-bold text-[10px] uppercase tracking-wider text-muted-foreground/80 text-right">OIerDB</TableHead>
-                        <TableHead className="px-6 py-4 font-bold text-[10px] uppercase tracking-wider text-muted-foreground/80 text-right">CCF Score</TableHead>
-                        <TableHead className="px-6 py-4 font-bold text-[10px] uppercase tracking-wider text-muted-foreground/80 text-center">CCF Level</TableHead>
+                        <TableHead className="w-[80px] px-4.5 py-3 font-bold text-[10px] uppercase tracking-wider text-muted-foreground/80">UID</TableHead>
+                        <TableHead className="px-4.5 py-3 font-bold text-[10px] uppercase tracking-wider text-muted-foreground/80">Name</TableHead>
+                        <TableHead className="px-4.5 py-3 font-bold text-[10px] uppercase tracking-wider text-muted-foreground/80">Gender</TableHead>
+                        <TableHead className="px-4.5 py-3 font-bold text-[10px] uppercase tracking-wider text-muted-foreground/80">Enrollment</TableHead>
+                        <TableHead className="px-4.5 py-3 font-bold text-[10px] uppercase tracking-wider text-muted-foreground/80 text-right">OIerDB</TableHead>
+                        <TableHead className="px-4.5 py-3 font-bold text-[10px] uppercase tracking-wider text-muted-foreground/80 text-right">CCF Score</TableHead>
+                        <TableHead className="px-4.5 py-3 font-bold text-[10px] uppercase tracking-wider text-muted-foreground/80 text-center">CCF Level</TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
                     {results.data.map((oier) => (
                         <TableRow key={oier.uid} className="hover:bg-muted/5 transition-colors border-muted/20">
-                            <TableCell className="px-6 py-4 font-mono text-[11px] text-muted-foreground">{oier.uid}</TableCell>
-                            <TableCell className="px-6 py-4">
+                            <TableCell className="px-4.5 py-2.5 font-mono text-[11px] text-muted-foreground">{oier.uid}</TableCell>
+                            <TableCell className="px-4.5 py-2.5">
                                 <a 
                                     href={`https://oier.baoshuo.dev/oier/${oier.uid}`} 
                                     target="_blank" 
@@ -116,16 +116,16 @@ function ResultsDisplay({ results, error, loading }) {
                                     <ExternalLink className="size-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                                 </a>
                             </TableCell>
-                            <TableCell className="px-6 py-4">{formatGender(oier.gender)}</TableCell>
-                            <TableCell className="px-6 py-4 font-medium text-xs">{oier.enroll_middle ?? 'N/A'}</TableCell>
-                            <TableCell className="px-6 py-4 text-right font-mono font-bold text-xs">{oier.oierdb_score}</TableCell>
-                            <TableCell className="px-6 py-4 text-right font-mono font-bold text-xs">{oier.ccf_score}</TableCell>
-                            <TableCell className="px-6 py-4 text-center">{formatCCFLevel(oier.ccf_level)}</TableCell>
+                            <TableCell className="px-4.5 py-2.5">{formatGender(oier.gender)}</TableCell>
+                            <TableCell className="px-4.5 py-2.5 font-medium text-xs">{oier.enroll_middle ?? 'N/A'}</TableCell>
+                            <TableCell className="px-4.5 py-2.5 text-right font-mono font-bold text-xs">{oier.oierdb_score}</TableCell>
+                            <TableCell className="px-4.5 py-2.5 text-right font-mono font-bold text-xs">{oier.ccf_score}</TableCell>
+                            <TableCell className="px-4.5 py-2.5 text-center">{formatCCFLevel(oier.ccf_level)}</TableCell>
                         </TableRow>
                     ))}
                     {results.data.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={7} className="h-40 text-center text-muted-foreground text-xs italic">
+                        <TableCell colSpan={7} className="h-32 text-center text-muted-foreground text-xs italic">
                           No programmers matched your criteria. Try loosening your filters.
                         </TableCell>
                       </TableRow>
@@ -137,13 +137,13 @@ function ResultsDisplay({ results, error, loading }) {
 
         {results.usage && (
           <details className="group bg-muted/20 border border-muted/40 rounded-2xl overflow-hidden transition-all">
-              <summary className="flex items-center gap-2 cursor-pointer p-4 font-bold text-[10px] uppercase tracking-widest text-muted-foreground/60 hover:bg-muted/30 select-none">
+              <summary className="flex items-center gap-2 cursor-pointer p-3 font-bold text-[10px] uppercase tracking-widest text-muted-foreground/60 hover:bg-muted/30 select-none">
                   <Database className="size-3.5" />
                   Performance Metrics
                   <Info className="size-3 ml-auto opacity-40" />
               </summary>
-              <div className="p-4 pt-0">
-                <pre className="text-[10px] bg-background/50 p-4 rounded-xl overflow-x-auto font-mono text-muted-foreground/80 border border-muted/30">
+              <div className="p-3 pt-0">
+                <pre className="text-[10px] bg-background/50 p-3 rounded-xl overflow-x-auto font-mono text-muted-foreground/80 border border-muted/30">
                     <code>{JSON.stringify(results.usage, null, 2)}</code>
                 </pre>
               </div>
