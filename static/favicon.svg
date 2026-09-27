@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="70 70 660 660" width="100%" height="100%">
+    <defs>
+        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur1" />
+            <feGaussianBlur in="SourceGraphic" stdDeviation="20" result="blur2" />
+            <feGaussianBlur in="SourceGraphic" stdDeviation="35" result="blur3" />
+            <feMerge>
+                <feMergeNode in="blur3" />
+                <feMergeNode in="blur2" />
+                <feMergeNode in="blur1" />
+                <feMergeNode in="SourceGraphic" />
+            </feMerge>
+        </filter>
+        <filter id="float-shadow" x="-30%" y="-30%" width="160%" height="160%">
+            <feDropShadow dx="0" dy="15" stdDeviation="8" flood-color="#000" flood-opacity="0.5"/>
+        </filter>
+        <filter id="shadow-only" x="-30%" y="-30%" width="160%" height="160%">
+            <feDropShadow dx="0" dy="15" stdDeviation="8" flood-color="#000" flood-opacity="0.5" result="shadow"/>
+            <feComposite in="shadow" in2="SourceGraphic" operator="out"/>
+        </filter>
+
+        <!-- Lighting Gradients -->
+        <radialGradient id="core-reflection" cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.6" />
+            <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
+        </radialGradient>
+        
+        <linearGradient id="side-highlight" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.2" />
+            <stop offset="50%" stop-color="#ffffff" stop-opacity="0" />
+            <stop offset="100%" stop-color="#000000" stop-opacity="0.2" />
+        </linearGradient>
+    </defs>
+
+    <g transform="translate(0, 0)">
+        <!-- Floating Layer 4 (Bottom-most) -->
+        <g filter="url(#float-shadow)">
+            <polygon points="400,360 700,510 400,660 100,510" fill="#1e2229" stroke="#2a2e36" stroke-width="0.5" />
+            <polygon points="100,510 400,660 400,700 100,550" fill="#181b21" stroke="#25292f" stroke-width="0.5" />
+            <polygon points="400,660 700,510 700,550 400,700" fill="#0d0f13" stroke="#1a1d22" stroke-width="0.5" />
+            <!-- Side highlights -->
+            <polygon points="100,510 400,660 400,700 100,550" fill="url(#side-highlight)" opacity="0.1" />
+            <polygon points="400,660 700,510 700,550 400,700" fill="url(#side-highlight)" opacity="0.1" />
+            <!-- Reflection from core (faint) -->
+            <polygon points="400,360 700,510 400,660 100,510" fill="url(#core-reflection)" opacity="0.15" />
+        </g>
+
+        <!-- Floating Layer 3 -->
+        <g filter="url(#float-shadow)">
+            <polygon points="400,308 700,458 400,608 100,458" fill="#323740" stroke="#3f444f" stroke-width="0.5" />
+            <polygon points="100,458 400,608 400,648 100,498" fill="#282c33" stroke="#353a45" stroke-width="0.5" />
+            <polygon points="400,608 700,458 700,498 400,648" fill="#1a1d22" stroke="#252930" stroke-width="0.5" />
+            <!-- Side highlights -->
+            <polygon points="100,458 400,608 400,648 100,498" fill="url(#side-highlight)" opacity="0.15" />
+            <polygon points="400,608 700,458 700,498 400,648" fill="url(#side-highlight)" opacity="0.15" />
+            <!-- Reflection from core -->
+            <polygon points="400,308 700,458 400,608 100,458" fill="url(#core-reflection)" opacity="0.3" />
+        </g>
+
+        <!-- Floating Layer 2 -->
+        <g filter="url(#float-shadow)">
+            <polygon points="400,256 700,406 400,556 100,406" fill="#464c58" stroke="#525863" stroke-width="0.5" />
+            <polygon points="100,406 400,556 400,596 100,446" fill="#3a3f4a" stroke="#484d5a" stroke-width="0.5" />
+            <polygon points="400,556 700,406 700,446 400,596" fill="#2a2e36" stroke="#353a42" stroke-width="0.5" />
+            <!-- Side highlights -->
+            <polygon points="100,406 400,556 400,596 100,446" fill="url(#side-highlight)" opacity="0.2" />
+            <polygon points="400,556 700,406 700,446 400,596" fill="url(#side-highlight)" opacity="0.2" />
+            <!-- Reflection from core -->
+            <polygon points="400,256 700,406 400,556 100,406" fill="url(#core-reflection)" opacity="0.45" />
+        </g>
+
+        <!-- Floating Layer 1 -->
+        <g filter="url(#float-shadow)">
+            <polygon points="400,204 700,354 400,504 100,354" fill="#5a606d" stroke="#686e7a" stroke-width="0.5" />
+            <polygon points="100,354 400,504 400,544 100,394" fill="#4d535e" stroke="#5a606d" stroke-width="0.5" />
+            <polygon points="400,504 700,354 700,394 400,544" fill="#3b404a" stroke="#454b55" stroke-width="0.5" />
+            <!-- Side highlights -->
+            <polygon points="100,354 400,504 400,544 100,394" fill="url(#side-highlight)" opacity="0.25" />
+            <polygon points="400,504 700,354 700,394 400,544" fill="url(#side-highlight)" opacity="0.25" />
+            <!-- Reflection from core -->
+            <polygon points="400,204 700,354 400,504 100,354" fill="url(#core-reflection)" opacity="0.6" />
+            <!-- Edge glow highlight -->
+            <path d="M 400,204 L 700,354 L 400,504 L 100,354 Z" fill="none" stroke="#ffffff" stroke-width="1" opacity="0.2" />
+        </g>
+
+        <!-- Rim Shadow (Placed below Crystal) -->
+        <g filter="url(#shadow-only)">
+            <polygon points="100,250 400,400 400,440 100,290" />
+            <polygon points="400,400 700,250 700,290 400,440" />
+            <polygon points="400,166 232,250 232,290 400,206" />
+            <polygon points="400,166 568,250 568,290 400,206" />
+            <path d="M 400,100 L 700,250 L 400,400 L 100,250 Z M 400,166 L 232,250 L 400,334 L 568,250 Z" fill-rule="evenodd" />
+        </g>
+
+        <!-- Crystal Layer -->
+        <g filter="url(#float-shadow)">
+            <polygon points="100,302 400,152 700,302 400,452" fill="#ffffff" filter="url(#glow)" opacity="0.4" />
+            <g filter="url(#glow)">
+                <polygon points="400,152 700,302 400,452 100,302" fill="#ffffff" />
+                <polygon points="100,302 400,452 400,492 100,342" fill="#e8eef5" />
+                <polygon points="400,452 700,302 700,342 400,492" fill="#d0d8e2" />
+            </g>
+            <g stroke="#ffffff" stroke-width="0.5" stroke-linejoin="round">
+                <polygon points="400,152 700,302 400,452 100,302" fill="#ffffff" />
+                <polygon points="100,302 400,452 400,492 100,342" fill="#e8eef5" />
+                <polygon points="400,452 700,302 700,342 400,492" fill="#d0d8e2" />
+            </g>
+        </g>
+
+        <!-- Top Rim Surface -->
+        <g stroke-linejoin="round">
+            <!-- Outer Sides -->
+            <polygon points="100,250 400,400 400,440 100,290" fill="#525862" stroke="#606670" stroke-width="0.5" />
+            <polygon points="400,400 700,250 700,290 400,440" fill="#2d313a" stroke="#3a3f49" stroke-width="0.5" />
+            <!-- Inner Sides (Reflecting core) -->
+            <polygon points="400,166 232,250 232,290 400,206" fill="#3a3f4a" stroke="#4a4f5a" stroke-width="0.5" />
+            <polygon points="400,166 568,250 568,290 400,206" fill="#1e2226" stroke="#2a2e32" stroke-width="0.5" />
+            <!-- Inner wall illumination -->
+            <polygon points="400,166 232,250 232,290 400,206" fill="url(#core-reflection)" opacity="0.4" />
+            <polygon points="400,166 568,250 568,290 400,206" fill="url(#core-reflection)" opacity="0.4" />
+            <!-- Top Face -->
+            <path d="M 400,100 L 700,250 L 400,400 L 100,250 Z M 400,166 L 232,250 L 400,334 L 568,250 Z" fill="#4a4f57" fill-rule="evenodd" stroke="#5a6069" stroke-width="0.5" />
+            <!-- Reflection from core on top face -->
+            <path d="M 400,100 L 700,250 L 400,400 L 100,250 Z M 400,166 L 232,250 L 400,334 L 568,250 Z" fill="url(#core-reflection)" opacity="0.5" fill-rule="evenodd" />
+        </g>
+
+    </g>
+</svg>
