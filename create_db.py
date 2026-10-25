@@ -3,25 +3,27 @@ import json
 import os
 import tempfile
 
+from cloudflare.script.upstream_data import GENERATOR_DIR, load_encoding_tables
+
 # --- 数据源文件 ---
-DIST_DIR = 'oierdb-data/dist'
-STATIC_FILE = os.path.join(DIST_DIR, 'static.json')
-RESULT_FILE = os.path.join(DIST_DIR, 'result.txt')
+DIST_DIR = GENERATOR_DIR / 'dist'
+STATIC_FILE = DIST_DIR / 'static.json'
+RESULT_FILE = DIST_DIR / 'result.txt'
 
 # --- 输出文件 ---
 DB_FILE = os.environ.get('OIER_DATABASE_PATH', 'oier_data.db')
 
-# 从 util.py 中复制，用于解码索引
-PROVINCES = [
-    "安徽", "北京", "福建", "甘肃", "广东", "广西", "贵州", "海南", "河北", "河南",
-    "黑龙江", "湖北", "湖南", "吉林", "江苏", "江西", "辽宁", "内蒙古", "山东", "山西",
-    "陕西", "上海", "四川", "天津", "新疆", "浙江", "重庆", "宁夏", "云南", "澳门",
-    "香港", "青海", "西藏", "台湾",
-]
-AWARD_LEVELS = [
-    "金牌", "银牌", "铜牌", "一等奖", "二等奖", "三等奖", "国际金牌", "国际银牌",
-    "国际铜牌", "前5%", "前15%", "前25%",
-]
+def decode_index(value, choices, field, allow_empty=False):
+    """解码上游编号；学校的 -1 代表保留 ID 的废弃占位项。"""
+    if type(value) is int:
+        if allow_empty and value == -1:
+            return ''
+        if 0 <= value < len(choices):
+            return choices[value]
+    elif isinstance(value, str):
+        if value in choices or (allow_empty and value == ''):
+            return value
+    raise ValueError(f'Unknown upstream {field}: {value!r}')
 
 def create_tables(cursor):
     """创建数据库表结构"""
@@ -78,7 +80,7 @@ def create_tables(cursor):
     ''')
     print("Tables created successfully.")
 
-def load_static_data(cursor):
+def load_static_data(cursor, encodings):
     """从 static.json 加载 School 和 Contest 数据"""
     print("Loading data from static.json...")
     with open(STATIC_FILE, 'r', encoding='utf-8') as f:
@@ -86,21 +88,25 @@ def load_static_data(cursor):
 
     schools_to_insert = []
     for i, school_data in enumerate(data['schools']):
-        schools_to_insert.append((i, school_data[0], school_data[1], school_data[2], school_data[3]))
+        province = decode_index(
+            school_data[1], encodings['provinces'], 'school province', allow_empty=True
+        )
+        schools_to_insert.append((i, school_data[0], province, school_data[2], school_data[3]))
     cursor.executemany('INSERT INTO School (id, name, province, city, score) VALUES (?, ?, ?, ?, ?)', schools_to_insert)
     print(f"Inserted {len(schools_to_insert)} schools.")
 
     contests_to_insert = []
     for i, contest_data in enumerate(data['contests']):
         contests_to_insert.append((
-            i, contest_data.get('name'), contest_data.get('type'),
+            i, contest_data.get('name'),
+            decode_index(contest_data.get('type'), encodings['contest_types'], 'contest type'),
             contest_data.get('year'), contest_data.get('fall_semester'),
             contest_data.get('full_score')
         ))
     cursor.executemany('INSERT INTO Contest (id, name, type, year, fall_semester, full_score) VALUES (?, ?, ?, ?, ?, ?)', contests_to_insert)
     print(f"Inserted {len(contests_to_insert)} contests.")
 
-def load_results_data(cursor):
+def load_results_data(cursor, encodings):
     """从 result.txt 加载 OIer 和 Record 数据"""
     print("Loading data from result.txt...")
     oiers_to_insert = []
@@ -125,8 +131,8 @@ def load_results_data(cursor):
                 record_data_str = record_part.split(';')[0].split(':')[0:6]
                 score_val = float(record_data_str[2]) if record_data_str[2] else None
                 province_idx, level_idx = int(record_data_str[4]), int(record_data_str[5])
-                province_str = PROVINCES[province_idx] if 0 <= province_idx < len(PROVINCES) else record_data_str[4]
-                level_str = AWARD_LEVELS[level_idx] if 0 <= level_idx < len(AWARD_LEVELS) else record_data_str[5]
+                province_str = decode_index(province_idx, encodings['provinces'], 'record province')
+                level_str = decode_index(level_idx, encodings['award_levels'], 'award level')
                 record_data = (
                     oier_uid, int(record_data_str[0]), int(record_data_str[1]),
                     score_val, int(record_data_str[3]), province_str, level_str
@@ -159,6 +165,7 @@ def validate_database(cursor):
 
 def main():
     """主函数"""
+    encodings = load_encoding_tables(GENERATOR_DIR)
     target_path = os.path.abspath(DB_FILE)
     target_dir = os.path.dirname(target_path)
     temp_fd, temp_path = tempfile.mkstemp(
@@ -174,8 +181,8 @@ def main():
         conn.execute("PRAGMA foreign_keys = ON")
         cursor = conn.cursor()
         create_tables(cursor)
-        load_static_data(cursor)
-        load_results_data(cursor)
+        load_static_data(cursor, encodings)
+        load_results_data(cursor, encodings)
         validate_database(cursor)
         conn.commit()
         conn.close()

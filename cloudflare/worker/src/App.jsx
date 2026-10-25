@@ -369,7 +369,7 @@ function App() {
               <VersionBadge
                 label="OIerDB-data"
                 sha={versionInfo?.oierdb_data_sha}
-                repositoryUrl="https://github.com/OIerDb-ng/OIerDb-data-generator"
+                repositoryUrl="https://github.com/OIerDb-ng/OIerDb"
               />
             </div>
           </div>

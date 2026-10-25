@@ -1,7 +1,7 @@
 # OIerFinder
 
 OIerFinder 是一个基于
-[OIerDb-data-generator](https://github.com/OIerDb-ng/OIerDb-data-generator)
+[OIerDb](https://github.com/OIerDb-ng/OIerDb)
 公开数据的 OI 选手信息查询与复合筛选工具。项目同时提供本地查询工具和部署在
 Cloudflare Workers + D1 上的 Web 应用。
 
@@ -28,7 +28,7 @@ Cloudflare Workers + D1 上的 Web 应用。
 | HTTP API | Hono、Cloudflare Workers | `cloudflare/worker/api/` |
 | 云端数据库 | Cloudflare D1 | `cloudflare/migrations/` |
 | 本地查询 | Python、SQLite、Flask | 仓库根目录、`utils/` |
-| 上游数据 | Git submodule | `oierdb-data/` |
+| 上游数据 | Git submodule | `oierdb-data/generator/`、`oierdb-data/data/` |
 | 自动部署 | GitHub Actions | `.github/workflows/sync-oier-data.yml` |
 
 ## 快速开始
@@ -54,14 +54,26 @@ uv sync --locked
 git submodule update --init --recursive
 ```
 
+从旧数据源升级的已有克隆，需要先同步子模块的新地址，再检出仓库记录的版本：
+
+```bash
+git submodule sync -- oierdb-data
+git submodule update --init --recursive
+```
+
 ### 生成本地数据库
 
 先运行上游生成器，再构建 SQLite：
 
 ```bash
-(cd oierdb-data && ../.venv/bin/python main.py)
+(cd oierdb-data/generator && ../../.venv/bin/python main.py)
 uv run python create_db.py
 ```
+
+生成器从 `oierdb-data/data/` 读取原始数据，产物位于
+`oierdb-data/generator/dist/`。导入时从同一上游版本的 `generator/util.py` 读取
+省份、奖项和比赛类型编号表，将编号转换为查询接口使用的名称；废弃学校的占位项
+保留原始 ID，避免比赛记录关联到错误学校。
 
 生成的 `oier_data.db` 仅供本地运行使用，已被 Git 忽略。可以通过
 `OIER_DATABASE_PATH` 指定其他输出位置：
@@ -155,8 +167,9 @@ D1。该同步是公开写操作；历史奖项不会因为洛谷当前页面缺
 
 ### 数据变更判断
 
-工作流先比较上游 Git SHA。需要检查数据时，再对生成的 `result.txt` 和规范化后的
-`static.json` 计算 `source_data_hash`：
+工作流先比较上游 Git SHA。需要检查数据时，再对生成的 `result.txt`、规范化后的
+`static.json` 以及同一版本的省份、奖项和比赛类型编号表计算 `source_data_hash`。
+编号含义变化也会触发数据更新，单纯的生成器代码或 JSON 排版变化不会导致重写：
 
 | 情况 | 行为 |
 | --- | --- |
@@ -208,7 +221,7 @@ python update_cloudflare.py
 │   └── worker/
 │       ├── api/             # Hono API 与 OpenAPI
 │       └── src/             # React 前端
-├── oierdb-data/             # 上游数据生成器子模块
+├── oierdb-data/             # OIerDb 子模块（generator/ 与 data/）
 ├── utils/                   # 本地查询与洛谷解析
 ├── app.py                   # 本地 Flask 页面
 ├── create_db.py             # SQLite 构建
@@ -219,6 +232,7 @@ python update_cloudflare.py
 ## 数据与隐私
 
 核心数据来自
-[OIerDb-ng/OIerDb-data-generator](https://github.com/OIerDb-ng/OIerDb-data-generator)。
+[OIerDb-ng/OIerDb](https://github.com/OIerDb-ng/OIerDb)。旧的
+`OIerDb-data-generator` 已合并到该仓库，自动同步跟踪新仓库的默认分支。
 项目仅聚合公开记录。使用、部署或再分发数据时，请遵守数据源要求、适用法律法规，并
 尊重选手隐私。

@@ -13,6 +13,11 @@ class SourceDataFingerprintTests(unittest.TestCase):
         self.static_path = self.root / "static.json"
         self.result_path = self.root / "result.txt"
         self.result_path.write_text("1,Alice\\n", encoding="utf-8")
+        self.encodings = {
+            "provinces": ["四川", "台湾"],
+            "award_levels": ["一等奖", "金牌"],
+            "contest_types": ["NGOI", "CSP提高"],
+        }
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -34,6 +39,7 @@ class SourceDataFingerprintTests(unittest.TestCase):
         first_hash = calculate_source_data_hash(
             self.static_path,
             self.result_path,
+            self.encodings,
         )
 
         self.write_static(
@@ -46,6 +52,7 @@ class SourceDataFingerprintTests(unittest.TestCase):
         second_hash = calculate_source_data_hash(
             self.static_path,
             self.result_path,
+            dict(reversed(list(self.encodings.items()))),
         )
 
         self.assertEqual(first_hash, second_hash)
@@ -55,12 +62,14 @@ class SourceDataFingerprintTests(unittest.TestCase):
         original_hash = calculate_source_data_hash(
             self.static_path,
             self.result_path,
+            self.encodings,
         )
 
         self.write_static({"schools": [["B"], ["A"]], "contests": []})
         reordered_hash = calculate_source_data_hash(
             self.static_path,
             self.result_path,
+            self.encodings,
         )
         self.assertNotEqual(original_hash, reordered_hash)
 
@@ -69,8 +78,27 @@ class SourceDataFingerprintTests(unittest.TestCase):
         changed_result_hash = calculate_source_data_hash(
             self.static_path,
             self.result_path,
+            self.encodings,
         )
         self.assertNotEqual(original_hash, changed_result_hash)
+
+    def test_detects_encoding_changes_when_generated_files_are_identical(self):
+        self.write_static({"schools": [["学校", 0, "成都", 1]], "contests": []})
+        original_hash = calculate_source_data_hash(
+            self.static_path, self.result_path, self.encodings
+        )
+        self.encodings["contest_types"][0] = "WC-AI"
+        renamed_type_hash = calculate_source_data_hash(
+            self.static_path, self.result_path, self.encodings
+        )
+        self.assertNotEqual(original_hash, renamed_type_hash)
+
+        self.encodings["contest_types"][0] = "NGOI"
+        self.encodings["provinces"].reverse()
+        reordered_provinces_hash = calculate_source_data_hash(
+            self.static_path, self.result_path, self.encodings
+        )
+        self.assertNotEqual(original_hash, reordered_provinces_hash)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 定义各个子目录的路径
 OIERDB_DATA_DIR = os.path.join(BASE_DIR, 'oierdb-data')
+OIERDB_GENERATOR_DIR = os.path.join(OIERDB_DATA_DIR, 'generator')
 CLOUDFLARE_SCRIPT_DIR = os.path.join(BASE_DIR, 'cloudflare', 'script')
 CLOUDFLARE_WORKER_DIR = os.path.join(BASE_DIR, 'cloudflare', 'worker')
 STATS_OUTPUT_PATH = os.path.join(CLOUDFLARE_WORKER_DIR, 'api', 'contest_stats.json')
@@ -51,14 +52,18 @@ def main():
     """主函数，按顺序执行所有更新和部署步骤"""
     
     print_step("Step 1: Updating oierdb-data submodule")
-    run_command(["git", "submodule", "update", "--remote", "--merge"])
+    run_command(["git", "submodule", "sync", "--", "oierdb-data"])
+    run_command([
+        "git", "submodule", "update", "--init", "--remote", "--checkout",
+        "--", "oierdb-data",
+    ])
     
     print_step("Step 2: Installing dependencies")
     # 需要这些包来处理数据、解析配置以及与 Cloudflare API 交互
     run_command(["uv", "pip", "install", "pypinyin", "requests", "tqdm", "pyyaml"])
 
     print_step("Step 3: Generating latest data files from submodule")
-    run_command([sys.executable, "main.py"], cwd=OIERDB_DATA_DIR)
+    run_command([sys.executable, "main.py"], cwd=OIERDB_GENERATOR_DIR)
     
     with tempfile.TemporaryDirectory(prefix="oierfinder-") as temp_dir:
         local_db_path = os.path.join(temp_dir, "oier_data.db")

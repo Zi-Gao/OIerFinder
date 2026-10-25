@@ -11,7 +11,7 @@ on:
         default: false
         type: boolean
       upstream_sha:
-        description: Optional exact OIerDb-data-generator commit to deploy
+        description: Optional exact OIerDb commit to deploy
         required: false
         type: string
   push:
@@ -22,6 +22,7 @@ on:
       - ".gitmodules"
       - "oierdb-data"
       - "create_db.py"
+      - "test_create_db.py"
       - "calculate_stats.py"
       - "pyproject.toml"
       - "uv.lock"
@@ -77,12 +78,14 @@ jobs:
           uv run python -m py_compile \
             create_db.py \
             calculate_stats.py \
+            cloudflare/script/upstream_data.py \
             cloudflare/script/data_fingerprint.py \
             cloudflare/script/upload_to_d1.py \
             cloudflare/script/create_indexes.py \
             utils/luogu_crawl.py \
             luogu_crawler.py
           uv run python -m unittest \
+            test_create_db \
             cloudflare.script.test_data_fingerprint \
             cloudflare.script.test_upload_to_d1
 
@@ -141,8 +144,8 @@ jobs:
 
       - name: Generate upstream distribution files
         if: steps.detect.outputs.should_inspect_data == 'true'
-        working-directory: oierdb-data
-        run: ../.venv/bin/python main.py
+        working-directory: oierdb-data/generator
+        run: ../../.venv/bin/python main.py
 
       - name: Compare generated data content
         id: content
