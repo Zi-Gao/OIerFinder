@@ -1,383 +1,138 @@
-name: Sync OIer data to Cloudflare
+name: Diagnose D1 API authentication (read-only)
 
 on:
-  schedule:
-    - cron: "17 */6 * * *"
   workflow_dispatch:
-    inputs:
-      force:
-        description: Regenerate and deploy data even when the upstream SHA is already active
-        required: false
-        default: false
-        type: boolean
-      upstream_sha:
-        description: Optional exact OIerDb-data-generator commit to deploy
-        required: false
-        type: string
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/sync-oier-data.yml"
-      - ".gitmodules"
-      - "oierdb-data"
-      - "create_db.py"
-      - "calculate_stats.py"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "cloudflare/migrations/**"
-      - "cloudflare/script/**"
-      - "cloudflare/worker/**"
 
 permissions:
   contents: read
 
-concurrency:
-  group: oier-data-production
-  cancel-in-progress: false
-
 jobs:
-  sync:
-    name: Build, verify, and deploy
+  diagnose:
+    name: Verify the existing production token with read-only requests
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 3
     environment: production
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_DATABASE_ID: ${{ secrets.CLOUDFLARE_DATABASE_ID }}
       CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
-      D1_BATCH_SIZE: "5000"
-
     steps:
-      - name: Configure temporary database path
+      - name: Probe token validity and D1 access without changing data
         run: |
-          echo "OIER_DATABASE_PATH=$RUNNER_TEMP/oier_data.db" >> "$GITHUB_ENV"
-
-      - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
-          fetch-depth: 1
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version-file: ".python-version"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          enable-cache: true
-
-      - name: Install Python dependencies
-        run: uv sync --locked
-
-      - name: Validate deployment scripts
-        run: |
-          uv run python -m py_compile \
-            create_db.py \
-            calculate_stats.py \
-            cloudflare/script/data_fingerprint.py \
-            cloudflare/script/upload_to_d1.py \
-            cloudflare/script/create_indexes.py \
-            utils/luogu_crawl.py \
-            luogu_crawler.py
-          uv run python -m unittest \
-            cloudflare.script.test_data_fingerprint \
-            cloudflare.script.test_upload_to_d1
-
-      - name: Detect upstream data change
-        id: detect
-        env:
-          FORCE_INPUT: ${{ github.event.inputs.force }}
-          REQUESTED_SHA: ${{ github.event.inputs.upstream_sha }}
-        run: |
-          if [[ -n "$REQUESTED_SHA" ]]; then
-            if [[ ! "$REQUESTED_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
-              echo "upstream_sha must be a full 40-character Git commit SHA" >&2
-              exit 2
-            fi
-            git -C oierdb-data fetch --depth=1 origin "$REQUESTED_SHA"
-          else
-            git -C oierdb-data fetch --depth=1 origin HEAD
-          fi
-
-          upstream_sha="$(git -C oierdb-data rev-parse FETCH_HEAD)"
-          git -C oierdb-data checkout --detach "$upstream_sha"
-          active_sha="$(uv run python cloudflare/script/upload_to_d1.py --print-active-sha)"
-          active_source_data_hash="$(
-            uv run python cloudflare/script/upload_to_d1.py \
-              --print-active-source-data-hash
-          )"
-
-          force_data_update=false
-          if [[ "$FORCE_INPUT" == "true" ]]; then
-            force_data_update=true
-          fi
-
-          should_inspect_data=false
-          if [[
-            "$force_data_update" == "true" ||
-            "$upstream_sha" != "$active_sha" ||
-            -z "$active_source_data_hash"
-          ]]; then
-            should_inspect_data=true
-          fi
-
-          echo "upstream_sha=$upstream_sha" >> "$GITHUB_OUTPUT"
-          echo "active_sha=$active_sha" >> "$GITHUB_OUTPUT"
-          echo "active_source_data_hash=$active_source_data_hash" >> "$GITHUB_OUTPUT"
-          echo "force_data_update=$force_data_update" >> "$GITHUB_OUTPUT"
-          echo "should_inspect_data=$should_inspect_data" >> "$GITHUB_OUTPUT"
-
-          {
-            echo "### OIer upstream change detection"
-            echo "- Upstream SHA: \`$upstream_sha\`"
-            echo "- Active SHA: \`${active_sha:-none}\`"
-            echo "- Active source data hash: \`${active_source_data_hash:-none}\`"
-            echo "- Forced data update: \`$force_data_update\`"
-            echo "- Content inspection required: \`$should_inspect_data\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Generate upstream distribution files
-        if: steps.detect.outputs.should_inspect_data == 'true'
-        working-directory: oierdb-data
-        run: ../.venv/bin/python main.py
-
-      - name: Compare generated data content
-        id: content
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          FORCE_DATA_UPDATE: ${{ steps.detect.outputs.force_data_update }}
-          SHOULD_INSPECT_DATA: ${{ steps.detect.outputs.should_inspect_data }}
-          UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
-          ACTIVE_SHA: ${{ steps.detect.outputs.active_sha }}
-          ACTIVE_SOURCE_DATA_HASH: ${{ steps.detect.outputs.active_source_data_hash }}
-        run: |
-          source_data_hash=""
-          content_changed=false
-          metadata_advanced=false
-          should_initialize_source_hash=false
-          should_update_data=false
-
-          if [[ "$SHOULD_INSPECT_DATA" == "true" ]]; then
-            source_data_hash="$(
-              uv run python cloudflare/script/data_fingerprint.py
-            )"
-
-            if [[ "$FORCE_DATA_UPDATE" == "true" ]]; then
-              should_update_data=true
-            elif [[ -z "$ACTIVE_SOURCE_DATA_HASH" ]]; then
-              if [[ -n "$ACTIVE_SHA" && "$UPSTREAM_SHA" == "$ACTIVE_SHA" ]]; then
-                should_initialize_source_hash=true
-              else
-                content_changed=true
-                should_update_data=true
-              fi
-            elif [[ "$source_data_hash" != "$ACTIVE_SOURCE_DATA_HASH" ]]; then
-              content_changed=true
-              should_update_data=true
-            else
-              uv run python cloudflare/script/upload_to_d1.py \
-                --advance-source-sha "$UPSTREAM_SHA" \
-                --source-data-hash "$source_data_hash"
-              metadata_advanced=true
-            fi
-          fi
-
-          should_deploy_worker=false
-          if [[
-            "$EVENT_NAME" == "push" ||
-            "$should_update_data" == "true" ||
-            "$should_initialize_source_hash" == "true"
-          ]]; then
-            should_deploy_worker=true
-          fi
-
-          echo "source_data_hash=$source_data_hash" >> "$GITHUB_OUTPUT"
-          echo "content_changed=$content_changed" >> "$GITHUB_OUTPUT"
-          echo "metadata_advanced=$metadata_advanced" >> "$GITHUB_OUTPUT"
-          echo "should_initialize_source_hash=$should_initialize_source_hash" >> "$GITHUB_OUTPUT"
-          echo "should_update_data=$should_update_data" >> "$GITHUB_OUTPUT"
-          echo "should_deploy_worker=$should_deploy_worker" >> "$GITHUB_OUTPUT"
-
-          {
-            echo "### OIer data content comparison"
-            echo "- Generated source data hash: \`${source_data_hash:-not-generated}\`"
-            echo "- Content changed: \`$content_changed\`"
-            echo "- Metadata-only SHA advance: \`$metadata_advanced\`"
-            echo "- Source hash initialization required: \`$should_initialize_source_hash\`"
-            echo "- Core data update required: \`$should_update_data\`"
-            echo "- Worker deployment required: \`$should_deploy_worker\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Build and validate local database
-        if: steps.content.outputs.should_update_data == 'true'
-        run: |
-          uv run python create_db.py
-          uv run python calculate_stats.py \
-            --db "$OIER_DATABASE_PATH" \
-            --output cloudflare/worker/api/contest_stats.json
-
-      - name: Create release manifest
-        if: steps.content.outputs.should_update_data == 'true'
-        id: manifest
-        env:
-          UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
-          SOURCE_DATA_HASH: ${{ steps.content.outputs.source_data_hash }}
-          WORKER_VERSION: ${{ github.sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          uv run python - <<'PY'
-          import hashlib
+          python3 - <<'PY'
           import json
           import os
-          import sqlite3
-
-          database_path = os.environ["OIER_DATABASE_PATH"]
-          files = (
-              ("database", database_path),
-              ("contest_stats", "cloudflare/worker/api/contest_stats.json"),
-          )
-          digest = hashlib.sha256()
-          file_hashes = {}
-          for name, path in files:
-              file_digest = hashlib.sha256()
-              with open(path, "rb") as source:
-                  while chunk := source.read(1024 * 1024):
-                      digest.update(chunk)
-                      file_digest.update(chunk)
-              file_hashes[name] = file_digest.hexdigest()
-
-          with sqlite3.connect(
-              f"file:{database_path}?mode=ro",
-              uri=True,
-          ) as connection:
-              counts = {
-                  table: connection.execute(
-                      f"SELECT COUNT(*) FROM {table}"
-                  ).fetchone()[0]
-                  for table in ("OIer", "Contest", "School", "Record")
-              }
-
-          data_hash = digest.hexdigest()
-          manifest = {
-              "upstream_sha": os.environ["UPSTREAM_SHA"],
-              "worker_version": os.environ["WORKER_VERSION"],
-              "github_run_url": os.environ["RUN_URL"],
-              "data_hash": data_hash,
-              "source_data_hash": os.environ["SOURCE_DATA_HASH"],
-              "file_hashes": file_hashes,
-              "row_counts": counts,
-          }
-          with open("release-manifest.json", "w", encoding="utf-8") as target:
-              json.dump(manifest, target, ensure_ascii=False, indent=2)
-              target.write("\n")
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"data_hash={data_hash}\n")
-          PY
-
-      - name: Set up Node.js
-        if: steps.content.outputs.should_deploy_worker == 'true'
-        uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: cloudflare/worker/package-lock.json
-
-      - name: Install and validate Worker
-        if: steps.content.outputs.should_deploy_worker == 'true'
-        working-directory: cloudflare/worker
-        run: |
-          npm ci
-          npm test
-          npm run lint
-          npm run build
-
-      - name: Archive generated release
-        if: steps.content.outputs.should_update_data == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: oier-data-${{ steps.detect.outputs.upstream_sha }}
-          path: |
-            cloudflare/worker/api/contest_stats.json
-            release-manifest.json
-          if-no-files-found: error
-          retention-days: 14
-          compression-level: 6
-
-      - name: Apply D1 migrations
-        if: steps.content.outputs.should_deploy_worker == 'true'
-        working-directory: cloudflare/worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
-        run: npx wrangler d1 migrations apply DB --remote --config wrangler.toml
-
-      - name: Initialize active source data hash
-        if: steps.content.outputs.should_initialize_source_hash == 'true'
-        env:
-          UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
-          SOURCE_DATA_HASH: ${{ steps.content.outputs.source_data_hash }}
-        run: |
-          uv run python cloudflare/script/upload_to_d1.py \
-            --initialize-source-sha "$UPSTREAM_SHA" \
-            --source-data-hash "$SOURCE_DATA_HASH"
-
-      - name: Deploy Worker
-        if: steps.content.outputs.should_deploy_worker == 'true'
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: cloudflare/worker
-          command: deploy --keep-vars --var OIERFINDER_SHA:${{ github.sha }}
-
-      - name: Upload and promote D1 data
-        if: steps.content.outputs.should_update_data == 'true'
-        env:
-          UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
-          DATA_HASH: ${{ steps.manifest.outputs.data_hash }}
-          SOURCE_DATA_HASH: ${{ steps.content.outputs.source_data_hash }}
-          WORKER_VERSION: ${{ github.sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          uv run python cloudflare/script/upload_to_d1.py \
-            --source-sha "$UPSTREAM_SHA" \
-            --data-hash "$DATA_HASH" \
-            --source-data-hash "$SOURCE_DATA_HASH" \
-            --worker-version "$WORKER_VERSION" \
-            --run-url "$RUN_URL"
-
-      - name: Ensure D1 indexes
-        if: steps.content.outputs.should_deploy_worker == 'true'
-        run: uv run python cloudflare/script/create_indexes.py
-
-      - name: Activate release
-        if: steps.content.outputs.should_update_data == 'true'
-        env:
-          UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
-        run: |
-          uv run python cloudflare/script/upload_to_d1.py \
-            --activate-source-sha "$UPSTREAM_SHA"
-          {
-            echo "### Deployment completed"
-            echo "- Active upstream SHA: \`$UPSTREAM_SHA\`"
-            echo "- Data hash: \`${{ steps.manifest.outputs.data_hash }}\`"
-            echo "- Source data hash: \`${{ steps.content.outputs.source_data_hash }}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Remove temporary database
-        if: always()
-        run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-
-          database_path = Path(os.environ["OIER_DATABASE_PATH"]).resolve()
-          runner_temp = Path(os.environ["RUNNER_TEMP"]).resolve()
-          if database_path.parent != runner_temp:
-              raise RuntimeError(
-                  f"Refusing to remove database outside RUNNER_TEMP: {database_path}"
+          import re
+          import urllib.error
+          import urllib.request
+          
+          TOKEN = os.environ.get("CLOUDFLARE_D1_API_TOKEN", "")
+          ACCOUNT = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+          DATABASE = os.environ.get("CLOUDFLARE_DATABASE_ID", "")
+          
+          
+          def redact(value):
+              text = str(value)
+              for secret in (TOKEN, ACCOUNT, DATABASE):
+                  if secret:
+                      text = text.replace(secret, "[redacted]")
+              return re.sub(r"[\x00-\x1f\x7f]", " ", text)[:500]
+          
+          
+          def probe(label, url, payload=None):
+              encoded = None if payload is None else json.dumps(payload).encode()
+              request = urllib.request.Request(
+                  url,
+                  data=encoded,
+                  headers={
+                      "Authorization": "Bearer " + TOKEN,
+                      "Content-Type": "application/json",
+                  },
+                  method="GET" if payload is None else "POST",
               )
-          database_path.unlink(missing_ok=True)
+              try:
+                  with urllib.request.urlopen(request, timeout=20) as response:
+                      http_status = response.status
+                      raw = response.read(256_000)
+              except urllib.error.HTTPError as error:
+                  http_status = error.code
+                  raw = error.read(256_000)
+              except (urllib.error.URLError, TimeoutError) as error:
+                  result = {"probe": label, "transport_error": redact(error)}
+                  print(json.dumps(result, ensure_ascii=False), flush=True)
+                  return False
+          
+              try:
+                  data = json.loads(raw)
+              except (ValueError, UnicodeDecodeError):
+                  data = {}
+              if not isinstance(data, dict):
+                  data = {}
+          
+              errors = data.get("errors") or []
+              if not isinstance(errors, list):
+                  errors = [errors]
+              result = {
+                  "probe": label,
+                  "http_status": http_status,
+                  "success": data.get("success"),
+                  "errors": [
+                      {
+                          "code": error.get("code"),
+                          "message": redact(error.get("message", "")),
+                      }
+                      if isinstance(error, dict)
+                      else {"message": redact(error)}
+                      for error in errors
+                  ],
+              }
+              value = data.get("result")
+              if label == "token_verify" and isinstance(value, dict):
+                  result["token_id"] = value.get("id")
+                  result["token_status"] = value.get("status")
+                  result["expires_on"] = value.get("expires_on")
+              elif isinstance(value, list):
+                  result["sql_results"] = [
+                      {
+                          "success": item.get("success"),
+                          "error": redact(item.get("error", "")),
+                          "rows_read": (item.get("meta") or {}).get("rows_read"),
+                          "rows_written": (item.get("meta") or {}).get("rows_written"),
+                      }
+                      for item in value if isinstance(item, dict)
+                  ]
+              print(json.dumps(result, ensure_ascii=False), flush=True)
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+                  summary.write("- " + json.dumps(result, ensure_ascii=False) + "\n")
+              return 200 <= http_status < 300 and data.get("success") is True
+          
+          
+          def main():
+              print(json.dumps({
+                  "token_present": bool(TOKEN),
+                  "account_present": bool(ACCOUNT),
+                  "database_present": bool(DATABASE),
+                  "token_has_outer_whitespace": TOKEN != TOKEN.strip(),
+                  "token_has_bearer_prefix": TOKEN.lower().startswith("bearer "),
+              }), flush=True)
+              if not all((TOKEN, ACCOUNT, DATABASE)):
+                  raise SystemExit("Required Cloudflare credentials are missing.")
+              base = (
+                  "https://api.cloudflare.com/client/v4/accounts/"
+                  + ACCOUNT + "/d1/database/" + DATABASE
+              )
+              checks = [
+                  probe(
+                      "token_verify",
+                      "https://api.cloudflare.com/client/v4/user/tokens/verify",
+                  ),
+                  probe("d1_query_select_1", base + "/query", {"sql": "SELECT 1 AS probe"}),
+                  probe("d1_raw_select_1", base + "/raw", {"sql": "SELECT 1 AS probe"}),
+              ]
+              if not all(checks):
+                  raise SystemExit(1)
+          
+          
+          if __name__ == "__main__":
+              main()
           PY
