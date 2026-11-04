@@ -17,7 +17,7 @@ Cloudflare Workers + D1 上的 Web 应用。
 - 按姓名首字母、性别和初中入学年份进一步筛选。
 - 提供 React Web 界面、YAML 命令行查询和本地 Flask 页面。
 - 查询并同步公开的洛谷奖项认证，将 NOI 系列奖项转换为查询条件。
-- 自动跟踪上游数据内容，在内容未变化时避免重建和重写 D1。
+- 自动跟踪上游数据内容，校验成功快照后仅向 D1 写入变化行。
 - 对外提供 OpenAPI 3.1 契约和 Scalar 交互式 API 文档。
 
 ## 架构
@@ -162,12 +162,12 @@ D1。该同步是公开写操作；历史奖项不会因为洛谷当前页面缺
 在以下情况运行：
 
 - 每 6 小时检查一次上游默认分支。
-- 从 GitHub Actions 页面手动运行，可指定完整上游 SHA 或强制更新。
+- 从 GitHub Actions 页面手动运行，可指定完整上游 SHA 或强制重新生成和比较。
 - `main` 分支中的 Worker、迁移、数据脚本或工作流发生变化。
 
 ### 数据变更判断
 
-工作流先比较上游 Git SHA。需要检查数据时，再对生成的 `result.txt`、规范化后的
+工作流先比较上游 Git SHA 和入库规则版本。需要检查数据时，再对生成的 `result.txt`、规范化后的
 `static.json` 以及同一版本的省份、奖项和比赛类型编号表计算 `source_data_hash`。
 编号含义变化也会触发数据更新，单纯的生成器代码或 JSON 排版变化不会导致重写：
 
@@ -175,14 +175,55 @@ D1。该同步是公开写操作；历史奖项不会因为洛谷当前页面缺
 | --- | --- |
 | 上游 SHA 和数据内容都未变化 | 跳过数据构建与上传 |
 | 上游 SHA 变化，但数据内容未变化 | 只推进 active 上游 SHA |
-| 数据内容变化或手动强制更新 | 构建完整快照，暂存上传并事务切换 D1 |
+| 数据内容变化或入库规则变化 | 完整生成并校验快照，仅事务写入新增、修改、删除的行 |
+| 手动 `force=true` | 强制重新生成和比较；不绕过校验，不强制全量上传 |
 | 本仓库部署文件变化 | 测试并部署 Worker，不因此重写核心数据 |
 
-核心数据使用完整快照而不是逐行增量，因为学校、比赛和记录 ID 依赖上游生成顺序，
-不是稳定业务主键。洛谷奖项同步则使用增量插入与更新。
+完整数据在 Runner 上生成，差异在本地计算。`Record` 按 `(oier_uid, contest_id)`
+比较，忽略重建时会变化的自增 `id`，保留线上已有记录的内部编号。选手合并或拆分
+产生的旧行删除和新行插入也包含在差量中。`LuoguPrizes` 独立维护，不参与核心发布。
 
-SQLite 只存在于 GitHub Runner 的临时目录，并在工作流结束时删除。发布 artifact
-仅保留统计 JSON 和发布清单，不包含 `oier_data.db`。
+### 快照与发布状态
+
+工作流自动创建同仓库的独立 `data-state` 分支，存放以下文件：
+
+```text
+oier_data.db.gz       # 规范排序的四张核心表，不包含连接凭据或其他表
+contest_stats.json   # 与该快照逐项核对的 Worker 统计
+manifest.json        # 文件校验、业务数据校验、入库规则版本、来源与行数
+```
+
+先保存不可变候选 commit，再部署兼容 Worker，最后在同一个 D1 事务中应用差量、
+校验结果并更新 `DataRelease.snapshot_commit`。D1 的指针是成功基准，分支 HEAD
+可能是尚未发布的候选版本，不能直接当成线上状态。上传失败不写核心表；事务失败
+保留旧数据与旧指针；响应丢失后先查询发布记录，禁止盲目重发。
+
+首次接入只读线上核心表制作基准，确认读取期间版本和变更计数未变化，存档成功后
+才补上快照指针；不会重写已有核心数据。没有已有 `active` 发布记录、基准损坏或
+缺失时会停止，不自动尝试全量覆盖空库或修复不明状态。
+
+迁移 `0004` 为核心表增加事务内写入门禁和变更计数触发器。旧脚本和未开启门禁的
+直接写入会被拒绝；发布器在同一事务中开启门禁、写入并关闭门禁。每次增删改都会
+在同一事务里推进计数。
+线上计数与成功快照不符、保护表/触发器/索引被改动时停止发布。每条差量都有旧值、
+唯一性和写入结果断言，数据、发布指针和日写入预算一起提交或回滚。
+命令行入口会核对目标库与 Worker 的 `DB` 绑定一致；计划还绑定具体账号和数据库，
+防止准备后更换环境把差量写到另一个库。
+
+默认每次最多 1,000 行操作、15,000 估算写入，每 UTC 日最多 75,000 估算同步写入，
+单次请求最多 4 MiB。可通过工作流的 `D1_SYNC_MAX_OPERATIONS`、
+`D1_SYNC_MAX_ESTIMATED_WRITES`、`D1_SYNC_DAILY_WRITE_BUDGET` 调整。估算包含断言、
+变更计数和索引开销，不等同 Cloudflare 账单，也不包含其他服务的用量。超出预算
+保持旧版，不自动拆成多个正式表事务或回退全量上传。
+
+数据分支采用普通追加提交，不强推或自动改写历史。旧快照属于 Git 历史；保留策略
+需要另行规划，必须保留 D1 当前引用的 commit。Runner 的 SQLite 与下载快照在
+结束时清理；Actions 的审计 artifact 只保留清单、差量数量和实际读写统计 14 天。
+
+核心实现及测试位于 `cloudflare/script/incremental_sync.py`、`incremental_d1.py`、
+`sync_snapshot.py` 及对应 `test_*.py`。`prepare` 只规划和建立首次基准，`archive`
+只保存候选，`publish` 才能写核心表。Worker 与 D1 不属于跨服务事务，新 Worker
+必须兼容发布前的旧数据。
 
 ### GitHub Environment
 
@@ -195,20 +236,25 @@ SQLite 只存在于 GitHub Runner 的临时目录，并在工作流结束时删�
 | `CLOUDFLARE_D1_API_TOKEN` | 仅用于 D1 读写 |
 | `CLOUDFLARE_WORKERS_API_TOKEN` | 构建并部署 Worker |
 
+保存快照的 job 需要 `contents: write`；`data-state` 的分支规则须允许该 Action
+普通推送。工作流仍只监听 `main` 的 push，数据分支提交不会递归触发同步。
+
 建议按目标账号和资源限制 Token 权限。Worker 的可选 `ADMIN_SECRET` 应通过 Cloudflare
 Secret 单独配置，工作流部署使用 `--keep-vars` 保留现有变量与 Secret。
 
 ### 手动部署
 
-`update_cloudflare.py` 会更新子模块、生成上游数据、在临时目录构建 SQLite、同步 D1、
-创建索引并部署 Worker。执行前需要准备 Cloudflare 环境变量并激活虚拟环境：
+生产数据发布使用同一个受保护的 GitHub Actions 流程。可以在 Actions 页面手动运行，
+也可以通过 GitHub CLI 触发：
 
 ```bash
-source .venv/bin/activate
-python update_cloudflare.py
+gh workflow run sync-oier-data.yml --ref main -f force=true
 ```
 
-生产环境优先使用 GitHub Actions，以保留可追踪的版本、数据哈希和运行记录。
+旧的 `update_cloudflare.py` 全量上传路径不再用于日常生产发布。旧上传器默认拒绝
+全量写入；显式 `--allow-initial-full-upload` 只保留给尚未安装增量保护的旧式初始导入。
+安装 `0004` 后，即使还没建立快照指针，也会在上传暂存表之前拒绝旧路径。不要
+通过手工改动 `DataRelease` 或写入门禁来跳过基准或漂移检查。
 
 ## 项目结构
 

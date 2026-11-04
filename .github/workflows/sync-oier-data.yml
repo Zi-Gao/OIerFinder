@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: Regenerate and deploy data even when the upstream SHA is already active
+        description: Rebuild and compare even when the upstream SHA is unchanged (never bypasses delta safeguards)
         required: false
         default: false
         type: boolean
@@ -15,8 +15,7 @@ on:
         required: false
         type: string
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
       - ".github/workflows/sync-oier-data.yml"
       - ".gitmodules"
@@ -39,20 +38,28 @@ concurrency:
 
 jobs:
   sync:
-    name: Build, verify, and deploy
+    name: Verify, archive, and publish incremental data
     runs-on: ubuntu-latest
     timeout-minutes: 120
     environment: production
+    permissions:
+      contents: write
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_DATABASE_ID: ${{ secrets.CLOUDFLARE_DATABASE_ID }}
       CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
-      D1_BATCH_SIZE: "5000"
+      PYTHONDONTWRITEBYTECODE: "1"
+      D1_SYNC_MAX_OPERATIONS: "1000"
+      D1_SYNC_MAX_ESTIMATED_WRITES: "15000"
+      D1_SYNC_DAILY_WRITE_BUDGET: "75000"
 
     steps:
-      - name: Configure temporary database path
+      - name: Configure temporary workspace
         run: |
-          echo "OIER_DATABASE_PATH=$RUNNER_TEMP/oier_data.db" >> "$GITHUB_ENV"
+          workspace="$RUNNER_TEMP/oier-sync"
+          mkdir -p "$workspace"
+          echo "OIER_SYNC_WORKSPACE=$workspace" >> "$GITHUB_ENV"
+          echo "OIER_DATABASE_PATH=$workspace/candidate.db" >> "$GITHUB_ENV"
 
       - name: Check out repository
         uses: actions/checkout@v6
@@ -73,27 +80,22 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --locked
 
-      - name: Validate deployment scripts
+      - name: Validate synchronization and failure recovery
         run: |
-          uv run python -m py_compile \
-            create_db.py \
-            calculate_stats.py \
-            cloudflare/script/upstream_data.py \
-            cloudflare/script/data_fingerprint.py \
-            cloudflare/script/upload_to_d1.py \
-            cloudflare/script/create_indexes.py \
-            utils/luogu_crawl.py \
-            luogu_crawler.py
           uv run python -m unittest \
             test_create_db \
             cloudflare.script.test_data_fingerprint \
-            cloudflare.script.test_upload_to_d1
+            cloudflare.script.test_upload_to_d1 \
+            cloudflare.script.test_incremental_d1 \
+            cloudflare.script.test_sync_snapshot \
+            cloudflare.script.test_incremental_sync
 
-      - name: Detect upstream data change
-        id: detect
+      - name: Inspect upstream and active release
+        id: inspect
         env:
           FORCE_INPUT: ${{ github.event.inputs.force }}
           REQUESTED_SHA: ${{ github.event.inputs.upstream_sha }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           if [[ -n "$REQUESTED_SHA" ]]; then
             if [[ ! "$REQUESTED_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
@@ -104,230 +106,86 @@ jobs:
           else
             git -C oierdb-data fetch --depth=1 origin HEAD
           fi
-
           upstream_sha="$(git -C oierdb-data rev-parse FETCH_HEAD)"
           git -C oierdb-data checkout --detach "$upstream_sha"
-          active_sha="$(uv run python cloudflare/script/upload_to_d1.py --print-active-sha)"
-          active_source_data_hash="$(
-            uv run python cloudflare/script/upload_to_d1.py \
-              --print-active-source-data-hash
-          )"
-
-          force_data_update=false
+          force_args=()
           if [[ "$FORCE_INPUT" == "true" ]]; then
-            force_data_update=true
+            force_args+=(--force)
           fi
-
-          should_inspect_data=false
-          if [[
-            "$force_data_update" == "true" ||
-            "$upstream_sha" != "$active_sha" ||
-            -z "$active_source_data_hash"
-          ]]; then
-            should_inspect_data=true
-          fi
-
-          echo "upstream_sha=$upstream_sha" >> "$GITHUB_OUTPUT"
-          echo "active_sha=$active_sha" >> "$GITHUB_OUTPUT"
-          echo "active_source_data_hash=$active_source_data_hash" >> "$GITHUB_OUTPUT"
-          echo "force_data_update=$force_data_update" >> "$GITHUB_OUTPUT"
-          echo "should_inspect_data=$should_inspect_data" >> "$GITHUB_OUTPUT"
-
-          {
-            echo "### OIer upstream change detection"
-            echo "- Upstream SHA: \`$upstream_sha\`"
-            echo "- Active SHA: \`${active_sha:-none}\`"
-            echo "- Active source data hash: \`${active_source_data_hash:-none}\`"
-            echo "- Forced data update: \`$force_data_update\`"
-            echo "- Content inspection required: \`$should_inspect_data\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          uv run python cloudflare/script/incremental_sync.py inspect \
+            --workspace "$OIER_SYNC_WORKSPACE" \
+            --upstream-sha "$upstream_sha" \
+            --event-name "$EVENT_NAME" \
+            "${force_args[@]}"
 
       - name: Generate upstream distribution files
-        if: steps.detect.outputs.should_inspect_data == 'true'
+        if: steps.inspect.outputs.should_generate == 'true'
         working-directory: oierdb-data/generator
         run: ../../.venv/bin/python main.py
 
-      - name: Compare generated data content
-        id: content
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          FORCE_DATA_UPDATE: ${{ steps.detect.outputs.force_data_update }}
-          SHOULD_INSPECT_DATA: ${{ steps.detect.outputs.should_inspect_data }}
-          UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
-          ACTIVE_SHA: ${{ steps.detect.outputs.active_sha }}
-          ACTIVE_SOURCE_DATA_HASH: ${{ steps.detect.outputs.active_source_data_hash }}
+      - name: Build and validate candidate database
+        id: build
+        if: steps.inspect.outputs.should_generate == 'true'
         run: |
-          source_data_hash=""
-          content_changed=false
-          metadata_advanced=false
-          should_initialize_source_hash=false
-          should_update_data=false
-
-          if [[ "$SHOULD_INSPECT_DATA" == "true" ]]; then
-            source_data_hash="$(
-              uv run python cloudflare/script/data_fingerprint.py
-            )"
-
-            if [[ "$FORCE_DATA_UPDATE" == "true" ]]; then
-              should_update_data=true
-            elif [[ -z "$ACTIVE_SOURCE_DATA_HASH" ]]; then
-              if [[ -n "$ACTIVE_SHA" && "$UPSTREAM_SHA" == "$ACTIVE_SHA" ]]; then
-                should_initialize_source_hash=true
-              else
-                content_changed=true
-                should_update_data=true
-              fi
-            elif [[ "$source_data_hash" != "$ACTIVE_SOURCE_DATA_HASH" ]]; then
-              content_changed=true
-              should_update_data=true
-            else
-              uv run python cloudflare/script/upload_to_d1.py \
-                --advance-source-sha "$UPSTREAM_SHA" \
-                --source-data-hash "$source_data_hash"
-              metadata_advanced=true
-            fi
-          fi
-
-          should_deploy_worker=false
-          if [[
-            "$EVENT_NAME" == "push" ||
-            "$should_update_data" == "true" ||
-            "$should_initialize_source_hash" == "true"
-          ]]; then
-            should_deploy_worker=true
-          fi
-
-          echo "source_data_hash=$source_data_hash" >> "$GITHUB_OUTPUT"
-          echo "content_changed=$content_changed" >> "$GITHUB_OUTPUT"
-          echo "metadata_advanced=$metadata_advanced" >> "$GITHUB_OUTPUT"
-          echo "should_initialize_source_hash=$should_initialize_source_hash" >> "$GITHUB_OUTPUT"
-          echo "should_update_data=$should_update_data" >> "$GITHUB_OUTPUT"
-          echo "should_deploy_worker=$should_deploy_worker" >> "$GITHUB_OUTPUT"
-
-          {
-            echo "### OIer data content comparison"
-            echo "- Generated source data hash: \`${source_data_hash:-not-generated}\`"
-            echo "- Content changed: \`$content_changed\`"
-            echo "- Metadata-only SHA advance: \`$metadata_advanced\`"
-            echo "- Source hash initialization required: \`$should_initialize_source_hash\`"
-            echo "- Core data update required: \`$should_update_data\`"
-            echo "- Worker deployment required: \`$should_deploy_worker\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Build and validate local database
-        if: steps.content.outputs.should_update_data == 'true'
-        run: |
+          source_hash="$(uv run python cloudflare/script/data_fingerprint.py)"
+          echo "source_data_hash=$source_hash" >> "$GITHUB_OUTPUT"
           uv run python create_db.py
           uv run python calculate_stats.py \
             --db "$OIER_DATABASE_PATH" \
-            --output cloudflare/worker/api/contest_stats.json
-
-      - name: Create release manifest
-        if: steps.content.outputs.should_update_data == 'true'
-        id: manifest
-        env:
-          UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
-          SOURCE_DATA_HASH: ${{ steps.content.outputs.source_data_hash }}
-          WORKER_VERSION: ${{ github.sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          uv run python - <<'PY'
-          import hashlib
-          import json
-          import os
-          import sqlite3
-
-          database_path = os.environ["OIER_DATABASE_PATH"]
-          files = (
-              ("database", database_path),
-              ("contest_stats", "cloudflare/worker/api/contest_stats.json"),
-          )
-          digest = hashlib.sha256()
-          file_hashes = {}
-          for name, path in files:
-              file_digest = hashlib.sha256()
-              with open(path, "rb") as source:
-                  while chunk := source.read(1024 * 1024):
-                      digest.update(chunk)
-                      file_digest.update(chunk)
-              file_hashes[name] = file_digest.hexdigest()
-
-          with sqlite3.connect(
-              f"file:{database_path}?mode=ro",
-              uri=True,
-          ) as connection:
-              counts = {
-                  table: connection.execute(
-                      f"SELECT COUNT(*) FROM {table}"
-                  ).fetchone()[0]
-                  for table in ("OIer", "Contest", "School", "Record")
-              }
-
-          data_hash = digest.hexdigest()
-          manifest = {
-              "upstream_sha": os.environ["UPSTREAM_SHA"],
-              "worker_version": os.environ["WORKER_VERSION"],
-              "github_run_url": os.environ["RUN_URL"],
-              "data_hash": data_hash,
-              "source_data_hash": os.environ["SOURCE_DATA_HASH"],
-              "file_hashes": file_hashes,
-              "row_counts": counts,
-          }
-          with open("release-manifest.json", "w", encoding="utf-8") as target:
-              json.dump(manifest, target, ensure_ascii=False, indent=2)
-              target.write("\n")
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"data_hash={data_hash}\n")
-          PY
+            --output "$OIER_SYNC_WORKSPACE/candidate-stats.json"
 
       - name: Set up Node.js
-        if: steps.content.outputs.should_deploy_worker == 'true'
+        if: steps.inspect.outputs.should_run == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: cloudflare/worker/package-lock.json
 
-      - name: Install and validate Worker
-        if: steps.content.outputs.should_deploy_worker == 'true'
+      - name: Install and test Worker
+        if: steps.inspect.outputs.should_run == 'true'
         working-directory: cloudflare/worker
         run: |
           npm ci
           npm test
-          npm run lint
-          npm run build
-
-      - name: Archive generated release
-        if: steps.content.outputs.should_update_data == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: oier-data-${{ steps.detect.outputs.upstream_sha }}
-          path: |
-            cloudflare/worker/api/contest_stats.json
-            release-manifest.json
-          if-no-files-found: error
-          retention-days: 14
-          compression-level: 6
 
       - name: Apply D1 migrations
-        if: steps.content.outputs.should_deploy_worker == 'true'
+        if: steps.inspect.outputs.needs_schema == 'true' || github.event_name == 'push'
         working-directory: cloudflare/worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
         run: npx wrangler d1 migrations apply DB --remote --config wrangler.toml
 
-      - name: Initialize active source data hash
-        if: steps.content.outputs.should_initialize_source_hash == 'true'
+      - name: Validate baseline and plan delta
+        id: plan
+        if: steps.inspect.outputs.should_run == 'true'
         env:
-          UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
-          SOURCE_DATA_HASH: ${{ steps.content.outputs.source_data_hash }}
+          SOURCE_HASH: ${{ steps.build.outputs.source_data_hash }}
         run: |
-          uv run python cloudflare/script/upload_to_d1.py \
-            --initialize-source-sha "$UPSTREAM_SHA" \
-            --source-data-hash "$SOURCE_DATA_HASH"
+          uv run python cloudflare/script/incremental_sync.py prepare \
+            --workspace "$OIER_SYNC_WORKSPACE" \
+            --database "$OIER_DATABASE_PATH" \
+            --stats "$OIER_SYNC_WORKSPACE/candidate-stats.json" \
+            --source-data-hash "$SOURCE_HASH" \
+            --worker-version "$GITHUB_SHA" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
-      - name: Deploy Worker
-        if: steps.content.outputs.should_deploy_worker == 'true'
+      - name: Build compatible Worker
+        if: steps.plan.outputs.should_deploy_worker == 'true'
+        working-directory: cloudflare/worker
+        run: |
+          npm run lint
+          npm run build
+
+      - name: Archive immutable candidate on data-state
+        id: archive
+        if: steps.plan.outputs.requires_publish == 'true'
+        run: |
+          uv run python cloudflare/script/incremental_sync.py archive \
+            --workspace "$OIER_SYNC_WORKSPACE"
+
+      - name: Deploy compatible Worker
+        if: steps.plan.outputs.should_deploy_worker == 'true'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
@@ -335,52 +193,61 @@ jobs:
           workingDirectory: cloudflare/worker
           command: deploy --keep-vars --var OIERFINDER_SHA:${{ github.sha }}
 
-      - name: Upload and promote D1 data
-        if: steps.content.outputs.should_update_data == 'true'
-        env:
-          UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
-          DATA_HASH: ${{ steps.manifest.outputs.data_hash }}
-          SOURCE_DATA_HASH: ${{ steps.content.outputs.source_data_hash }}
-          WORKER_VERSION: ${{ github.sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      - name: Publish delta and snapshot identity atomically
+        if: steps.plan.outputs.requires_publish == 'true'
         run: |
-          uv run python cloudflare/script/upload_to_d1.py \
-            --source-sha "$UPSTREAM_SHA" \
-            --data-hash "$DATA_HASH" \
-            --source-data-hash "$SOURCE_DATA_HASH" \
-            --worker-version "$WORKER_VERSION" \
-            --run-url "$RUN_URL"
+          uv run python cloudflare/script/incremental_sync.py publish \
+            --workspace "$OIER_SYNC_WORKSPACE"
 
-      - name: Ensure D1 indexes
-        if: steps.content.outputs.should_deploy_worker == 'true'
-        run: uv run python cloudflare/script/create_indexes.py
+      - name: Archive synchronization audit
+        if: always() && steps.inspect.outputs.should_run == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: oier-sync-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.OIER_SYNC_WORKSPACE }}/inspection.json
+            ${{ env.OIER_SYNC_WORKSPACE }}/plan.json
+            ${{ env.OIER_SYNC_WORKSPACE }}/publish-result.json
+            ${{ env.OIER_SYNC_WORKSPACE }}/bootstrap-archive/manifest.json
+            ${{ env.OIER_SYNC_WORKSPACE }}/baseline-archive/manifest.json
+            ${{ env.OIER_SYNC_WORKSPACE }}/candidate-archive/manifest.json
+          if-no-files-found: warn
+          retention-days: 14
 
-      - name: Activate release
-        if: steps.content.outputs.should_update_data == 'true'
-        env:
-          UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
+      - name: Record synchronization result
+        if: always()
         run: |
-          uv run python cloudflare/script/upload_to_d1.py \
-            --activate-source-sha "$UPSTREAM_SHA"
-          {
-            echo "### Deployment completed"
-            echo "- Active upstream SHA: \`$UPSTREAM_SHA\`"
-            echo "- Data hash: \`${{ steps.manifest.outputs.data_hash }}\`"
-            echo "- Source data hash: \`${{ steps.content.outputs.source_data_hash }}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          uv run python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
 
-      - name: Remove temporary database
+          workspace = Path(os.environ["OIER_SYNC_WORKSPACE"])
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("### OIer incremental synchronization\n\n")
+              for name in ("inspection.json", "plan.json", "publish-result.json"):
+                  path = workspace / name
+                  if not path.exists():
+                      continue
+                  data = json.loads(path.read_text())
+                  keys = ("upstream_sha", "should_generate", "needs_bootstrap", "row_operations",
+                          "estimated_writes", "snapshot_commit", "status", "rows_read", "rows_written")
+                  for key in keys:
+                      if key in data:
+                          summary.write(f"- {key}: `{data[key]}`\n")
+              summary.write("\nD1 DataRelease is authoritative if a request outcome or final job status is uncertain.\n")
+          PY
+
+      - name: Remove temporary databases and archives
         if: always()
         run: |
           python - <<'PY'
           import os
           from pathlib import Path
+          import shutil
 
-          database_path = Path(os.environ["OIER_DATABASE_PATH"]).resolve()
-          runner_temp = Path(os.environ["RUNNER_TEMP"]).resolve()
-          if database_path.parent != runner_temp:
-              raise RuntimeError(
-                  f"Refusing to remove database outside RUNNER_TEMP: {database_path}"
-              )
-          database_path.unlink(missing_ok=True)
+          workspace = Path(os.environ["OIER_SYNC_WORKSPACE"]).resolve()
+          if workspace.parent != Path(os.environ["RUNNER_TEMP"]).resolve() or workspace.name != "oier-sync":
+              raise RuntimeError("Refusing cleanup outside the synchronization workspace")
+          shutil.rmtree(workspace, ignore_errors=True)
           PY

@@ -5,6 +5,18 @@ from cloudflare.script import upload_to_d1
 
 
 class ReleaseMetadataTests(unittest.TestCase):
+    @patch.object(upload_to_d1, 'execute_d1_batch')
+    @patch.object(upload_to_d1, '_execute_d1_request')
+    @patch.object(upload_to_d1, 'get_release')
+    def test_full_upload_cannot_run_after_incremental_migration_even_before_bootstrap(
+        self, get_release, request, write_batch,
+    ):
+        get_release.return_value = {'snapshot_commit': None}
+        request.return_value = {'result': [{'results': [{'name': 'OierSyncState'}]}]}
+        with self.assertRaisesRegex(RuntimeError, 'before any staging writes'):
+            upload_to_d1.upload_database({})
+        write_batch.assert_not_called()
+
     @patch.object(upload_to_d1, "_execute_d1_request")
     @patch.object(upload_to_d1, "execute_d1_sql")
     def test_get_release_tolerates_schema_before_source_hash_migration(

@@ -196,8 +196,13 @@ def _execute_d1_request(cfg, endpoint, payload):
         json=payload,
         timeout=REQUEST_TIMEOUT_SECONDS,
     )
-    response.raise_for_status()
-    data = response.json()
+    try:
+        data = response.json()
+    except ValueError:
+        raise RuntimeError(f"Cloudflare D1 returned HTTP {response.status_code} without JSON") from None
+    if not response.ok:
+        errors = data.get('errors', [])
+        raise RuntimeError(f"Cloudflare D1 HTTP {response.status_code}: {errors}")
     if not data.get("success", False):
         raise RuntimeError(f"Cloudflare D1 API 请求失败: {data.get('errors', data)}")
 
@@ -260,7 +265,6 @@ def ensure_remote_schema(cfg):
 
 
 def get_release(cfg):
-    execute_d1_sql(cfg, RELEASE_SCHEMA)
     schema_data = _execute_d1_request(
         cfg,
         "query",
@@ -268,10 +272,19 @@ def get_release(cfg):
     )
     schema_rows = schema_data["result"][0].get("results", [])
     release_columns = {row.get("name") for row in schema_rows}
+    if not release_columns:
+        return None
     source_hash_column = (
         "source_data_hash"
         if "source_data_hash" in release_columns
         else "NULL AS source_data_hash"
+    )
+    snapshot_columns = ", ".join(
+        name if name in release_columns else f"NULL AS {name}"
+        for name in (
+            "snapshot_commit", "snapshot_sha256", "projection_version",
+            "logical_data_hash", "core_revision",
+        )
     )
     data = _execute_d1_request(
         cfg,
@@ -281,7 +294,7 @@ def get_release(cfg):
                 "SELECT upstream_sha, data_hash, "
                 f"{source_hash_column}, worker_version, status, "
                 "oier_count, contest_count, school_count, record_count, "
-                "github_run_url, updated_at, activated_at "
+                f"github_run_url, updated_at, activated_at, {snapshot_columns} "
                 "FROM DataRelease WHERE id = 1"
             )
         },
@@ -305,6 +318,8 @@ def get_active_release_source_data_hash(cfg):
 
 
 def advance_release_source_sha(cfg, source_sha, expected_source_data_hash):
+    if (get_release(cfg) or {}).get('snapshot_commit'):
+        raise RuntimeError('Use the incremental publisher to advance an archived release')
     execute_d1_batch(
         cfg,
         [
@@ -330,6 +345,8 @@ def advance_release_source_sha(cfg, source_sha, expected_source_data_hash):
 
 
 def initialize_release_source_data_hash(cfg, source_sha, source_data_hash):
+    if (get_release(cfg) or {}).get('snapshot_commit'):
+        raise RuntimeError('Cannot replace an archived release fingerprint with the legacy uploader')
     execute_d1_batch(
         cfg,
         [
@@ -356,6 +373,8 @@ def initialize_release_source_data_hash(cfg, source_sha, source_data_hash):
 
 
 def activate_release(cfg, source_sha):
+    if (get_release(cfg) or {}).get('snapshot_commit'):
+        raise RuntimeError('Incremental releases are activated inside their publish transaction')
     execute_d1_batch(
         cfg,
         [
@@ -516,6 +535,17 @@ def promote_staging_tables(cfg, expected_counts, release_metadata=None):
 
 
 def upload_database(cfg, release_metadata=None):
+    release = get_release(cfg)
+    if release and release.get("snapshot_commit"):
+        raise RuntimeError(
+            "Incremental publishing is initialized. Refusing a legacy full upload; "
+            "use the GitHub Actions incremental workflow."
+        )
+    sync_tables = _execute_d1_request(cfg, 'query', {
+        'sql': "SELECT name FROM sqlite_master WHERE type='table' AND name='OierSyncState'"
+    })
+    if sync_tables['result'][0].get('results'):
+        raise RuntimeError('Incremental safeguards are installed; the legacy full uploader is disabled before any staging writes')
     db_path = cfg["database"]["local_path"]
     if not os.path.isabs(db_path):
         db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), db_path))
@@ -580,6 +610,10 @@ def parse_args():
     )
     parser.add_argument("--worker-version", help="本次部署的 Worker 版本")
     parser.add_argument("--run-url", help="触发本次发布的 GitHub Actions 地址")
+    parser.add_argument(
+        '--allow-initial-full-upload', action='store_true',
+        help='Explicitly initialize an unarchived database using the legacy full uploader; never allowed after incremental initialization',
+    )
     return parser.parse_args()
 
 
@@ -642,6 +676,8 @@ def main():
             "run_url": args.run_url,
         }
 
+    if not args.allow_initial_full_upload:
+        raise RuntimeError('Automatic full uploads are disabled. Use the incremental GitHub Actions workflow.')
     upload_database(cfg, release_metadata)
 
 
