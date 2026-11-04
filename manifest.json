@@ -6,7 +6,7 @@
   "database_sha256": "e479f2c28ef3ca0407b47dd7d1200a20b9728a28838d5515a5428714fbd51d61",
   "format_version": 1,
   "logical_data_hash": "ba0329691d4d1649ae2c33fdbfb76f8e7c6a41af8a3d73d12ad28664326bb19d",
-  "projection_version": "legacy-audited-v1",
+  "projection_version": "126e6f0e02766652b7f06763632558eed7451db4a1f9734edf0d11cddb59818a",
   "row_counts": {
     "Contest": 142,
     "OIer": 125964,
@@ -16,5 +16,5 @@
   "source_data_hash": "69a262776b620e428beb97a3dd7c8c32029c0c63a3986407377f92e4c35c3419",
   "stats_sha256": "62fe1afd7efabeda73e8325cc99f313b567a59b088bfa4ca165a0e8a6c9a6ff3",
   "upstream_sha": "e104eb6da5f9509beceb563e92257ec5d314bc66",
-  "worker_version": "5879a2a7bfaf61268fbd45659b2b1c802ae1f90b"
+  "worker_version": "ad38c93a20118b8505fe8fda29c99f4475d73552"
 }
