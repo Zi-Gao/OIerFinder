@@ -231,7 +231,7 @@ function App() {
           </aside>
 
           {/* Main Area */}
-          <main className="lg:col-span-9 space-y-4">
+          <main className="min-w-0 lg:col-span-9 space-y-4">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <TabsList className="!w-full !h-11 p-1 bg-muted/40 border border-muted/40 flex items-center justify-between rounded-xl mb-4 shadow-sm">
                 <TabsTrigger 
