@@ -1,24 +1,41 @@
+<div align="center">
+
 # OIerFinder
 
-OIerFinder 是一个基于
-[OIerDb](https://github.com/OIerDb-ng/OIerDb)
-公开数据的 OI 选手信息查询与复合筛选工具。项目同时提供本地查询工具和部署在
-Cloudflare Workers + D1 上的 Web 应用。
+**从公开竞赛记录中，找到符合条件的 OI 选手。**
 
-- 在线站点：[https://of.zigao.ac](https://of.zigao.ac)
-- API 文档：[https://of.zigao.ac/docs](https://of.zigao.ac/docs)
-- OpenAPI 3.1：[https://of.zigao.ac/openapi.json](https://of.zigao.ac/openapi.json)
+基于 [OIerDb](https://github.com/OIerDb-ng/OIerDb) 的复合查询工具，
+提供在线页面、HTTP API 和本地查询方式。
+
+[在线使用](https://of.zigao.ac) · [API 文档](https://of.zigao.ac/docs) · [OpenAPI 3.1](https://of.zigao.ac/openapi.json)
+
+</div>
+
+---
+
+[功能](#功能) · [快速开始](#快速开始) · [本地使用](#本地使用) ·
+[Worker 开发](#cloudflare-worker-开发) · [API](#api) ·
+[同步与部署](#自动同步与部署) · [项目结构](#项目结构)
 
 ## 功能
 
-- 按比赛类型、年份、奖项等级、省份、学校、分数和排名组合筛选选手。
-- 支持多条获奖条件取交集，例如查询“2023 年 NOI 金牌且 2021 年 NOIP
-  一等奖”的选手。
-- 按姓名首字母、性别和初中入学年份进一步筛选。
-- 提供 React Web 界面、YAML 命令行查询和本地 Flask 页面。
-- 查询并同步公开的洛谷奖项认证，将 NOI 系列奖项转换为查询条件。
-- 自动跟踪上游数据内容，校验成功快照后仅向 D1 写入变化行。
-- 对外提供 OpenAPI 3.1 契约和 Scalar 交互式 API 文档。
+- **复合筛选**：按比赛类型、年份、奖项、省份、学校、分数和排名组合查询；
+  多条获奖条件取交集，例如同时获得 2023 年 NOI 金牌和 2021 年 NOIP 一等奖。
+- **选手条件**：进一步按姓名首字母、性别和初中入学年份筛选。
+- **洛谷导入**：查询公开的洛谷奖项认证，将可识别的 NOI 系列奖项转换为查询条件。
+- **多种使用方式**：在线页面、HTTP API、YAML 命令行查询和本地 Flask 页面。
+- **增量同步**：跟踪上游数据，校验快照后仅向 Cloudflare D1 写入变化行。
+
+### 在线查询
+
+| 入口 | 用途 |
+| --- | --- |
+| **UI Builder** | 使用表单组合选手条件和多条获奖条件 |
+| **Raw JSON** | 直接编辑查询请求，与表单共享查询条件 |
+| **Luogu UID** | 获取洛谷奖项，将可识别的条件导入表单 |
+
+页面还支持设置结果数量、切换深色模式和提供可选的管理员密钥。密钥仅保存在当前
+页面内存中，刷新后需要重新输入。
 
 ## 架构
 
@@ -33,6 +50,9 @@ Cloudflare Workers + D1 上的 Web 应用。
 
 ## 快速开始
 
+只想查询？直接打开[在线站点](https://of.zigao.ac)。以下步骤用于在本地生成数据库
+并运行 Python 查询工具；Worker 开发另见[下文](#cloudflare-worker-开发)。
+
 ### 环境要求
 
 - Git
@@ -40,7 +60,7 @@ Cloudflare Workers + D1 上的 Web 应用。
 - [uv](https://docs.astral.sh/uv/)
 - Node.js 22+（仅开发 Cloudflare Worker 时需要）
 
-### 安装
+### 1. 获取项目并安装依赖
 
 ```bash
 git clone --recursive https://github.com/Zi-Gao/OIerFinder.git
@@ -61,7 +81,7 @@ git submodule sync -- oierdb-data
 git submodule update --init --recursive
 ```
 
-### 生成本地数据库
+### 2. 生成本地数据库
 
 先运行上游生成器，再构建 SQLite：
 
@@ -82,6 +102,9 @@ uv run python create_db.py
 OIER_DATABASE_PATH=/tmp/oier_data.db uv run python create_db.py
 ```
 
+本地 CLI 和 Flask 页面默认读取仓库根目录的 `oier_data.db`；使用其他输出位置时，
+需将数据库放回该路径才能供它们使用。
+
 ## 本地使用
 
 ### 命令行查询
@@ -89,7 +112,9 @@ OIER_DATABASE_PATH=/tmp/oier_data.db uv run python create_db.py
 复制并修改 [sample_config.yml](sample_config.yml)，然后执行：
 
 ```bash
-uv run python oierfinder.py --config sample_config.yml
+cp sample_config.yml config.yml
+# 编辑 config.yml
+uv run python oierfinder.py --config config.yml
 ```
 
 `records` 中的每个条件组都必须由同一名选手的某条记录满足，多个条件组之间为 AND
@@ -120,8 +145,14 @@ uv run python luogu2yml.py \
 ```bash
 cd cloudflare/worker
 npm ci
+npx wrangler d1 migrations apply DB --local
 npm run dev
 ```
+
+默认访问 `http://localhost:5173`。本地开发使用独立的 D1 数据库，上面的迁移命令
+只创建表和同步保护，不会自动导入选手数据，也不会连接或修改线上数据库；仅启动页面
+即可查看界面，查询真实数据需要另行准备本地数据。`create_db.py` 生成的 SQLite
+文件供本地 Python 工具使用，不会自动成为 Worker 的 D1 数据库。
 
 常用检查：
 
@@ -134,7 +165,18 @@ npm run build
 `npm test` 除了覆盖查询逻辑，还会校验 OpenAPI 3.1 文档，并确保每个实际注册的业务
 路由都出现在 API 契约中。
 
-### API
+## API
+
+例如，查询 2023 年获得 NOI 金牌的选手：
+
+```bash
+curl -X POST https://of.zigao.ac/query-oier \
+  -H 'Content-Type: application/json' \
+  -d '{"record_filters":[{"contest_type":"NOI","level":"金牌","year":2023}],"oier_filters":{},"limit":20}'
+```
+
+每个 `record_filters` 条件都需要由该选手的至少一条记录满足，条件之间为 AND。
+完整字段、示例和错误码见 [交互式 API 文档](https://of.zigao.ac/docs)。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -150,10 +192,8 @@ npm run build
 中保存管理员密钥。
 
 洛谷接口在使用 `sync=true` 或 `sync=1` 时会从洛谷读取最新奖项并在后台增量写入
-D1。该同步是公开写操作；历史奖项不会因为洛谷当前页面缺失而删除。
-
-请求参数、响应模型、示例和错误码以
-[在线 API 文档](https://of.zigao.ac/docs) 为准。
+D1。该同步是公开写操作；历史奖项不会因为洛谷当前页面缺失而删除。响应中的
+`synced=true` 表示已成功读取并安排后台写入，并不保证后台写入已经完成。
 
 ## 自动同步与部署
 
@@ -272,7 +312,7 @@ gh workflow run sync-oier-data.yml --ref main -f force=true
 ├── app.py                   # 本地 Flask 页面
 ├── create_db.py             # SQLite 构建
 ├── oierfinder.py            # YAML 命令行查询
-└── update_cloudflare.py     # 手动云端更新流程
+└── update_cloudflare.py     # 旧式全量更新脚本，不用于日常生产部署
 ```
 
 ## 数据与隐私
