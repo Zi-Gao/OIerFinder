@@ -135,6 +135,42 @@ class PublishingFixture(unittest.TestCase):
 
 
 class IncrementalPublishingTests(PublishingFixture):
+    def test_request_size_guard_counts_the_actual_http_json_encoding(self):
+        statements = [sync.statement('SELECT ?', ['北京'])]
+        utf8_bytes = len(json.dumps({'batch': statements}, ensure_ascii=False).encode())
+        with patch.object(sync, 'MAX_REQUEST_BYTES', utf8_bytes):
+            with self.assertRaisesRegex(sync.SyncError, 'request size budget'):
+                sync.validate_packet(statements)
+
+    def test_release_with_3344_changes_remains_atomic_and_idempotent(self):
+        rows = {table: [dict(row) for row in data] for table, data in OLD_ROWS.items()}
+        rows['OIer'].extend(dict(rows['OIer'][0], uid=uid) for uid in range(3, 3347))
+        large_database = self.root / 'large.db'
+        large_state = snapshots.write_core_database(large_database, rows)
+        manifest = archive_fixture(large_database, self.root / 'archive-large', '4' * 40, 'b' * 64)
+        self.patch, self.summary = sync.diff_states(self.old_state, large_state)
+        operations, estimate = sync.estimate_writes(self.patch)
+        self.assertEqual(operations, 3344)
+        self.assertGreater(estimate, 15000)
+        self.target = sync.publication_values(manifest, '5' * 40, source_sha='4' * 40,
+            source_hash='b' * 64, worker_version='2' * 40,
+            run_url='https://example.invalid/large', revision=operations)
+
+        commands = sync.build_transaction(self.base, 0, self.patch, self.target, sync.Limits())
+        self.client.fail_at = len(commands) - 1
+        with self.assertRaises(sync.SyncError):
+            self.publish()
+        self.assert_old()
+
+        self.client.fail_at = None
+        self.assertEqual(self.publish()['status'], 'committed')
+        self.assertEqual(snapshots.read_state(self.old), large_state)
+        self.assertEqual(self.client.revision(), operations)
+        self.assertEqual(self.client.query('SELECT estimated_writes FROM OierSyncBudget'),
+                         [{'estimated_writes': estimate}])
+        self.assertEqual(self.publish()['status'], 'already_applied')
+        self.assertEqual(self.client.batch_count, 2)
+
     def test_delta_matches_complete_target_and_preserves_internal_record_ids(self):
         self.assertEqual(self.publish()['status'], 'committed')
         self.assertEqual(snapshots.read_state(self.old), self.new_state)

@@ -123,8 +123,6 @@ def prepare_run(client, repo, workspace, *, database=None, stats=None, source_ha
         source_sha=control['upstream_sha'], source_hash=source_hash,
         worker_version=worker_version if needs_snapshot else current.get('worker_version'),
         run_url=run_url, revision=revision + operations)
-    if requires_publish:
-        sync.build_transaction(current, revision, patch, target, limits)
     plan = {
         'format_version': 1, 'base': sync.release_identity(current), 'base_revision': revision,
         'target': target, 'needs_snapshot': needs_snapshot, 'requires_publish': requires_publish,
@@ -134,6 +132,14 @@ def prepare_run(client, repo, workspace, *, database=None, stats=None, source_ha
         'database': control['database'],
         'should_deploy_worker': control['event_name'] == 'push' or needs_snapshot,
     }
+    if requires_publish:
+        try:
+            sync.build_transaction(current, revision, patch, target, limits)
+        except sync.SyncError as error:
+            # Keep the reviewed delta visible even when safeguards reject it.
+            plan.update(status='blocked', validation_error=str(error))
+            save_json(workspace / 'plan.json', plan)
+            raise
     save_json(workspace / 'plan.json', plan)
     stats_source = workspace / ('candidate-archive' if needs_snapshot else 'baseline-archive') / 'contest_stats.json'
     shutil.copyfile(stats_source, stats_output or snapshots.ROOT / 'cloudflare/worker/api/contest_stats.json')
@@ -148,6 +154,8 @@ def load_plan(workspace):
     plan = json.loads((Path(workspace) / 'plan.json').read_text())
     if plan.get('format_version') != 1:
         raise sync.SyncError('Unsupported publication plan')
+    if plan.get('status') == 'blocked':
+        raise sync.SyncError('Blocked publication plan; rerun preparation after reviewing its validation error')
     return plan
 
 

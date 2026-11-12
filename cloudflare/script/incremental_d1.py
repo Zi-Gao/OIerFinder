@@ -44,8 +44,8 @@ class SyncError(RuntimeError):
 
 @dataclass(frozen=True)
 class Limits:
-    max_operations: int = 1000
-    max_estimated_writes: int = 15000
+    max_operations: int = 5000
+    max_estimated_writes: int = 35000
     daily_write_budget: int = 75000
 
     @classmethod
@@ -296,7 +296,8 @@ def validate_packet(statements):
     for item in statements:
         if len(item['sql'].encode('utf-8')) > 100000 or len(item['params']) > 100:
             raise SyncError('Delta exceeds a D1 statement limit; publishing stopped')
-    if len(json.dumps({'batch': statements}, ensure_ascii=False, allow_nan=False).encode()) > MAX_REQUEST_BYTES:
+    # requests encodes json= payloads with ASCII escapes, including Chinese text.
+    if len(json.dumps({'batch': statements}, allow_nan=False).encode()) > MAX_REQUEST_BYTES:
         raise SyncError('Delta exceeds the atomic request size budget; publishing stopped')
 
 
