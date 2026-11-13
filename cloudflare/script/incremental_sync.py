@@ -132,7 +132,9 @@ def prepare_run(client, repo, workspace, *, database=None, stats=None, source_ha
     }
     if requires_publish:
         try:
-            sync.build_transaction(current, revision, patch, target)
+            statements = sync.build_transaction(current, revision, patch, target)
+            plan['statement_count'] = len(statements)
+            plan['request_bytes'] = len(json.dumps({'batch': statements}, allow_nan=False).encode())
         except sync.SyncError as error:
             # Keep the reviewed delta visible even when safeguards reject it.
             plan.update(status='blocked', validation_error=str(error))

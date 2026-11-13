@@ -1,5 +1,6 @@
 """Fail-closed D1 delta publishing and transaction assertions."""
 
+import json
 from pathlib import Path
 import random
 import re
@@ -34,6 +35,8 @@ INDEX_NAMES = {
     'Record': ('idx_record_oier_covering', 'idx_record_contest_level_uid', 'idx_record_school_province_level_uid'),
 }
 MIGRATION = snapshots.ROOT / 'cloudflare/migrations/0004_incremental_sync.sql'
+JSON_ROWS_PER_STATEMENT = 250
+MAX_JSON_VALUE_BYTES = 2000000
 
 
 class SyncError(RuntimeError):
@@ -173,7 +176,8 @@ def diff_states(old, new):
 
 def estimate_writes(patch):
     # Table + revision trigger + two assertion writes, plus conservative index
-    # delete/insert costs. This is audit telemetry, never a publishing limit.
+    # delete/insert costs. Per-row assertion costs conservatively overestimate
+    # compact batches. This is audit telemetry, never a publishing limit.
     estimate, operations = 20, 0
     for table, changes in patch.items():
         for kind, rows in changes.items():
@@ -208,37 +212,85 @@ def release_assertion(base, revision):
     )
 
 
-def row_predicate(row):
-    return ' AND '.join(f'{col} IS ?' for col in row), list(row.values())
+def json_rows(rows, columns=None):
+    if columns is not None:
+        rows = [[row[col] for col in columns] for row in rows]
+    return json.dumps(rows, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
 
 
-def mutation_statements(table, kind, row):
-    statements = []
-    if kind == 'update':
-        old, new = row['old'], row['new']
-    elif kind == 'delete':
-        old, new = row, None
-    else:
-        old, new = None, row
-    key_row = {col: (old or new)[col] for col in snapshots.KEYS[table]}
-    key_where, key_params = row_predicate(key_row)
-    if old is not None:
-        where, params = row_predicate(old)
-        statements.append(assertion(f'(SELECT COUNT(*) FROM {table} WHERE {key_where})=1 AND EXISTS(SELECT 1 FROM {table} WHERE {where})', key_params + params))
-    else:
-        statements.append(assertion(f'NOT EXISTS(SELECT 1 FROM {table} WHERE {key_where})', key_params))
-    if kind == 'delete':
-        statements.append(statement(f'DELETE FROM {table} WHERE {key_where}', key_params))
-        statements.append(assertion(f'changes()=1 AND NOT EXISTS(SELECT 1 FROM {table} WHERE {key_where})', key_params))
-    elif kind == 'insert':
-        columns = list(new)
-        statements.append(statement(f'INSERT INTO {table} ({", ".join(columns)}) VALUES ({", ".join("?" for _ in columns)})', list(new.values())))
-    else:
-        columns = row['changed']
-        statements.append(statement(f'UPDATE {table} SET {", ".join(col + "=?" for col in columns)} WHERE {key_where}', [new[col] for col in columns] + key_params))
-    if new is not None:
-        where, params = row_predicate(new)
-        statements.append(assertion(f'changes()=1 AND (SELECT COUNT(*) FROM {table} WHERE {key_where})=1 AND EXISTS(SELECT 1 FROM {table} WHERE {where})', key_params + params))
+def mutation_chunks(kind, rows):
+    """Pack parameters under D1's string limit without limiting the release."""
+    chunk, before_bytes, after_bytes = [], 2, 2
+    for row in rows:
+        before = row['old'] if kind == 'update' else row if kind == 'delete' else None
+        after = row['new'] if kind == 'update' else row if kind == 'insert' else None
+        old_bytes = len(json_rows(list(before.values())).encode()) if before is not None else 0
+        new_bytes = len(json_rows(list(after.values())).encode()) if after is not None else 0
+        if max(old_bytes, new_bytes) + 2 > MAX_JSON_VALUE_BYTES:
+            raise SyncError('A row exceeds the D1 JSON parameter size limit')
+        separator = int(bool(chunk))
+        if chunk and (len(chunk) >= JSON_ROWS_PER_STATEMENT or
+                      max(before_bytes + old_bytes + separator, after_bytes + new_bytes + separator) > MAX_JSON_VALUE_BYTES):
+            yield chunk
+            chunk, before_bytes, after_bytes, separator = [], 2, 2, 0
+        chunk.append(row)
+        before_bytes += old_bytes + separator
+        after_bytes += new_bytes + separator
+    if chunk:
+        yield chunk
+
+
+def mutation_statements(table, kind, rows):
+    """Three compact statements per group, retaining every row's assertions."""
+    statements, groups = [], {}
+    for row in rows:
+        changed = tuple(row['changed']) if kind == 'update' else ()
+        groups.setdefault(changed, []).append(row)
+    def matches(columns, selected=None):
+        return ' AND '.join(f"{table}.{col} IS json_extract(src.value,'$[{columns.index(col)}]')"
+                            for col in (selected or columns))
+    for changed, group in groups.items():
+        for chunk in mutation_chunks(kind, group):
+            before = [row['old'] for row in chunk] if kind == 'update' else chunk if kind == 'delete' else None
+            after = [row['new'] for row in chunk] if kind == 'update' else chunk if kind == 'insert' else None
+            old_columns = list(before[0]) if before is not None else None
+            new_columns = list(after[0]) if after is not None else None
+            before_json = json_rows(before, old_columns) if before is not None else None
+            after_json = json_rows(after, new_columns) if after is not None else None
+            if before is not None:
+                key_where = matches(old_columns, snapshots.KEYS[table])
+                old_where = matches(old_columns)
+                statements.append(assertion(
+                    f'NOT EXISTS(SELECT 1 FROM json_each(?) AS src WHERE '
+                    f'(SELECT COUNT(*) FROM {table} WHERE {key_where})!=1 OR '
+                    f'NOT EXISTS(SELECT 1 FROM {table} WHERE {old_where}))', [before_json]))
+            else:
+                key_where = matches(new_columns, snapshots.KEYS[table])
+                statements.append(assertion(
+                    f'NOT EXISTS(SELECT 1 FROM json_each(?) AS src WHERE EXISTS('
+                    f'SELECT 1 FROM {table} WHERE {key_where}))', [after_json]))
+            if kind == 'delete':
+                id_col = 'uid' if table == 'OIer' else 'id'
+                statements.append(statement(
+                    f'DELETE FROM {table} WHERE {id_col} IN (SELECT {table}.{id_col} '
+                    f'FROM json_each(?) AS src JOIN {table} ON {key_where})', [before_json]))
+                statements.append(assertion(
+                    f'changes()=? AND NOT EXISTS(SELECT 1 FROM json_each(?) AS src '
+                    f'WHERE EXISTS(SELECT 1 FROM {table} WHERE {key_where}))', [len(chunk), before_json]))
+            else:
+                key_where = matches(new_columns, snapshots.KEYS[table])
+                if kind == 'insert':
+                    values = ','.join(f"json_extract(src.value,'$[{index}]')" for index in range(len(new_columns)))
+                    sql = f'INSERT INTO {table} ({",".join(new_columns)}) SELECT {values} FROM json_each(?) AS src'
+                else:
+                    updates = ','.join(f"{col}=json_extract(src.value,'$[{new_columns.index(col)}]')" for col in changed)
+                    sql = f'UPDATE {table} SET {updates} FROM json_each(?) AS src WHERE {key_where}'
+                statements.append(statement(sql, [after_json]))
+                new_where = matches(new_columns)
+                statements.append(assertion(
+                    f'changes()=? AND NOT EXISTS(SELECT 1 FROM json_each(?) AS src WHERE '
+                    f'(SELECT COUNT(*) FROM {table} WHERE {key_where})!=1 OR '
+                    f'NOT EXISTS(SELECT 1 FROM {table} WHERE {new_where}))', [len(chunk), after_json]))
     return statements
 
 
@@ -289,14 +341,11 @@ def build_transaction(base, base_revision, patch, target):
         assertion('changes()=1 AND (SELECT writing FROM OierSyncState WHERE id=1)=1')]
     for table in ('School', 'Contest', 'OIer'):
         for kind in ('insert', 'update'):
-            for row in patch[table][kind]:
-                commands.extend(mutation_statements(table, kind, row))
+            commands.extend(mutation_statements(table, kind, patch[table][kind]))
     for kind in ('delete', 'update', 'insert'):
-        for row in patch['Record'][kind]:
-            commands.extend(mutation_statements('Record', kind, row))
+        commands.extend(mutation_statements('Record', kind, patch['Record'][kind]))
     for table in ('OIer', 'Contest', 'School'):
-        for row in patch[table]['delete']:
-            commands.extend(mutation_statements(table, 'delete', row))
+        commands.extend(mutation_statements(table, 'delete', patch[table]['delete']))
     commands += [
         assertion('(SELECT revision FROM OierSyncState WHERE id=1) IS ?', [target['core_revision']]),
         statement('UPDATE OierSyncState SET writing=0 WHERE id=1 AND writing=1'),

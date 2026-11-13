@@ -166,6 +166,7 @@ class IncrementalPublishingTests(PublishingFixture):
             run_url='https://example.invalid/large', revision=operations)
 
         commands = sync.build_transaction(self.base, 0, self.patch, self.target)
+        self.assertLess(len(commands), 1000)
         self.client.fail_at = len(commands) - 1
         with self.assertRaises(sync.SyncError):
             self.publish()
@@ -179,6 +180,38 @@ class IncrementalPublishingTests(PublishingFixture):
                          [{'estimated_writes': estimate}])
         self.assertEqual(self.publish()['status'], 'already_applied')
         self.assertEqual(self.client.batch_count, 2)
+
+    def test_compact_group_checks_every_old_row(self):
+        rows = {table: [dict(row) for row in data] for table, data in OLD_ROWS.items()}
+        for row in rows['OIer']:
+            row['oierdb_score'] += 1
+        database = self.root / 'group.db'
+        state = snapshots.write_core_database(database, rows)
+        manifest = archive_fixture(database, self.root / 'archive-group', '4' * 40, 'b' * 64)
+        self.patch, _ = sync.diff_states(self.old_state, state)
+        self.target = sync.publication_values(manifest, '5' * 40, source_sha='4' * 40,
+            source_hash='b' * 64, worker_version='2' * 40, run_url='test', revision=2)
+        self.patch['OIer']['update'][1]['old'] = dict(self.patch['OIer']['update'][1]['old'], name='Wrong old value')
+        with self.assertRaises(sync.SyncError):
+            self.publish()
+        self.assert_old()
+
+    def test_duplicate_record_business_keys_in_a_group_roll_back(self):
+        self.patch['Record']['insert'].append(dict(self.patch['Record']['insert'][0]))
+        self.target['core_revision'] += 1
+        with self.assertRaises(sync.SyncError):
+            self.publish()
+        self.assert_old()
+
+    def test_json_groups_respect_the_binding_byte_limit_without_losing_rows(self):
+        rows = [{'uid': uid, 'name': '北' * 8} for uid in range(10)]
+        with patch.object(sync, 'MAX_JSON_VALUE_BYTES', 100):
+            chunks = list(sync.mutation_chunks('insert', rows))
+            self.assertGreater(len(chunks), 1)
+            self.assertEqual([row for chunk in chunks for row in chunk], rows)
+            self.assertTrue(all(len(sync.json_rows(chunk, list(chunk[0])).encode()) <= 100 for chunk in chunks))
+            with self.assertRaisesRegex(sync.SyncError, 'parameter size limit'):
+                list(sync.mutation_chunks('insert', [{'uid': 1, 'name': '北' * 100}]))
 
     def test_delta_matches_complete_target_and_preserves_internal_record_ids(self):
         self.assertEqual(self.publish()['status'], 'committed')
