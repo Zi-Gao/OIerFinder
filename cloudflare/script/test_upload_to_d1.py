@@ -1,3 +1,4 @@
+import json
 import unittest
 from unittest.mock import patch
 
@@ -5,6 +6,18 @@ from cloudflare.script import upload_to_d1
 
 
 class ReleaseMetadataTests(unittest.TestCase):
+    @patch.object(upload_to_d1.requests, 'post')
+    def test_json_payload_is_sent_as_compact_utf8_without_changing_values(self, post):
+        post.return_value.ok = True
+        post.return_value.json.return_value = {'success': True, 'result': [{'success': True}]}
+        payload = {'sql': 'SELECT ?', 'params': ['中文😀\n\\"']}
+        cfg = {'cloudflare': {'account_id': 'test-account', 'database_id': 'test-database', 'api_token': 'test-token'}}
+        upload_to_d1._execute_d1_request(cfg, 'query', payload)
+        body = post.call_args.kwargs['data']
+        self.assertEqual(json.loads(body), payload)
+        self.assertIn('中文😀'.encode(), body)
+        self.assertNotIn('json', post.call_args.kwargs)
+
     @patch.object(upload_to_d1.requests, 'post')
     def test_internal_errors_keep_retry_classification_without_resending_http_requests(self, post):
         post.return_value.ok = False

@@ -1,4 +1,5 @@
 import argparse
+import json
 import math
 import os
 import sqlite3
@@ -205,6 +206,10 @@ def _d1_url(cfg, endpoint):
     )
 
 
+def encode_d1_payload(payload):
+    return json.dumps(payload, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode('utf-8')
+
+
 def _execute_d1_request(cfg, endpoint, payload):
     response = requests.post(
         _d1_url(cfg, endpoint),
@@ -212,7 +217,7 @@ def _execute_d1_request(cfg, endpoint, payload):
             "Authorization": f"Bearer {cfg['cloudflare']['api_token']}",
             "Content-Type": "application/json",
         },
-        json=payload,
+        data=encode_d1_payload(payload),
         timeout=REQUEST_TIMEOUT_SECONDS,
     )
     try:

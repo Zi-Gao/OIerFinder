@@ -183,12 +183,30 @@ jobs:
 
       - name: Deploy compatible Worker
         if: steps.plan.outputs.should_deploy_worker == 'true'
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: cloudflare/worker
-          command: deploy --keep-vars --var OIERFINDER_SHA:${{ github.sha }}
+        working-directory: cloudflare/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
+        run: |
+          deploy_log="$RUNNER_TEMP/oier-worker-deploy.log"
+          for attempt in 1 2 3; do
+            if npx wrangler deploy --keep-vars --var "OIERFINDER_SHA:$GITHUB_SHA" > "$deploy_log" 2>&1; then
+              cat "$deploy_log"
+              exit 0
+            else
+              deploy_status=$?
+            fi
+            cat "$deploy_log"
+            if [[ "$attempt" -eq 3 ]]; then
+              exit "$deploy_status"
+            fi
+            case "$(< "$deploy_log")" in
+              *"[code: 10013]"*|*"HTTP 500"*|*"HTTP 502"*|*"HTTP 503"*|*"HTTP 504"*|*"ECONNRESET"*|*"ETIMEDOUT"*)
+                echo "::warning::Transient Cloudflare deployment error; retrying ($attempt/3)"
+                sleep "$((attempt * 5))"
+                ;;
+              *) exit "$deploy_status" ;;
+            esac
+          done
 
       - name: Publish delta and snapshot identity atomically
         if: steps.plan.outputs.requires_publish == 'true'
