@@ -79,12 +79,11 @@ def inspect_run(client, workspace, upstream_sha, event_name, force=False):
     return control
 
 
-def prepare_run(client, repo, workspace, *, database=None, stats=None, source_hash=None, worker_version=None, run_url=None, branch='data-state', limits=None, stats_output=None):
+def prepare_run(client, repo, workspace, *, database=None, stats=None, source_hash=None, worker_version=None, run_url=None, branch='data-state', stats_output=None):
     workspace = Path(workspace)
     control = json.loads((workspace / 'inspection.json').read_text())
     if client.identity() != control['database']:
         raise sync.SyncError('D1 target changed since inspection')
-    limits = limits or sync.Limits.from_env()
     current, _ = client.current()
     if sync.release_identity(current) != control['observed_release']:
         raise sync.SyncError('Production release changed since inspection; rerun from inspection')
@@ -128,13 +127,12 @@ def prepare_run(client, repo, workspace, *, database=None, stats=None, source_ha
         'target': target, 'needs_snapshot': needs_snapshot, 'requires_publish': requires_publish,
         'summary': summary, 'row_operations': operations, 'estimated_writes': estimate,
         'snapshot_commit': None if needs_snapshot else target_commit,
-        'limits': vars(limits),
         'database': control['database'],
         'should_deploy_worker': control['event_name'] == 'push' or needs_snapshot,
     }
     if requires_publish:
         try:
-            sync.build_transaction(current, revision, patch, target, limits)
+            sync.build_transaction(current, revision, patch, target)
         except sync.SyncError as error:
             # Keep the reviewed delta visible even when safeguards reject it.
             plan.update(status='blocked', validation_error=str(error))
@@ -186,6 +184,23 @@ def archive_run(repo, workspace, branch='data-state'):
 
 def publish_run(client, repo, workspace):
     workspace = Path(workspace)
+    try:
+        result = _publish_run(client, repo, workspace)
+    except Exception as error:
+        result = getattr(error, 'result', None) or {
+            'status': 'blocked', 'publication_attempted': False, 'error': str(error),
+            'recovery_action': 'Resolve validation errors and rerun inspection and preparation.',
+        }
+        save_json(workspace / 'publish-result.json', result)
+        print(json.dumps(result, ensure_ascii=False))
+        raise
+    save_json(workspace / 'publish-result.json', result)
+    print(json.dumps(result, ensure_ascii=False))
+    return result
+
+
+def _publish_run(client, repo, workspace):
+    workspace = Path(workspace)
     plan = load_plan(workspace)
     if not plan['requires_publish']:
         return {'status': 'unchanged'}
@@ -214,13 +229,7 @@ def publish_run(client, repo, workspace):
         run_url=plan['target']['github_run_url'], revision=plan['base_revision'] + plan['row_operations'])
     if expected_target != plan['target']:
         raise sync.SyncError('Publication identity differs from inspected source and archived data')
-    limits = sync.Limits.from_env()
-    if vars(limits) != plan['limits']:
-        raise sync.SyncError('Publishing limits changed after planning')
-    result = sync.publish(client, plan['base'], plan['base_revision'], patch, plan['target'], limits)
-    save_json(workspace / 'publish-result.json', result)
-    print(json.dumps(result, ensure_ascii=False))
-    return result
+    return sync.publish(client, plan['base'], plan['base_revision'], patch, plan['target'])
 
 
 def main():

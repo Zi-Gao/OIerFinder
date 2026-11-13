@@ -49,8 +49,6 @@ jobs:
       CLOUDFLARE_DATABASE_ID: ${{ secrets.CLOUDFLARE_DATABASE_ID }}
       CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
       PYTHONDONTWRITEBYTECODE: "1"
-      D1_SYNC_MAX_ESTIMATED_WRITES: "100000"
-      D1_SYNC_DAILY_WRITE_BUDGET: "100000"
 
     steps:
       - name: Configure temporary workspace
@@ -230,7 +228,8 @@ jobs:
                       continue
                   data = json.loads(path.read_text())
                   keys = ("upstream_sha", "should_generate", "needs_bootstrap", "row_operations",
-                          "estimated_writes", "snapshot_commit", "status", "validation_error", "rows_read", "rows_written")
+                          "estimated_writes", "snapshot_commit", "status", "validation_error", "rows_read", "rows_written",
+                          "publication_attempted", "active_snapshot_commit", "error", "verification_error", "recovery_action")
                   for key in keys:
                       if key in data:
                           summary.write(f"- {key}: `{data[key]}`\n")

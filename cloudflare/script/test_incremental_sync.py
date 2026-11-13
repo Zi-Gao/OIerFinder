@@ -40,24 +40,62 @@ class WorkflowPublishingTests(PublishingFixture):
         self.assertEqual(self.client.release()['snapshot_commit'], candidate)
         self.assertEqual(snapshots.read_state(self.old), self.new_state)
 
-    def test_rejected_budget_keeps_auditable_delta_and_cannot_be_archived_or_published(self):
+    def test_rejected_validation_keeps_auditable_delta_and_cannot_be_archived_or_published(self):
         workflow.inspect_run(self.client, self.workspace, '4' * 40, 'schedule')
-        with self.assertRaisesRegex(sync.SyncError, 'budget'):
-            workflow.prepare_run(self.client, self.repo, self.workspace,
-                database=self.new, stats=self.root / 'archive-new-stats.json',
-                source_hash='b' * 64, worker_version='2' * 40,
-                limits=sync.Limits(max_estimated_writes=1), stats_output=self.root / 'worker-stats.json')
+        with patch.object(sync, 'validate_packet', side_effect=sync.SyncError('D1 statement limit')):
+            with self.assertRaisesRegex(sync.SyncError, 'D1 statement limit'):
+                workflow.prepare_run(self.client, self.repo, self.workspace,
+                    database=self.new, stats=self.root / 'archive-new-stats.json',
+                    source_hash='b' * 64, worker_version='2' * 40,
+                    stats_output=self.root / 'worker-stats.json')
         plan = json.loads((self.workspace / 'plan.json').read_text())
         self.assertEqual(plan['status'], 'blocked')
         self.assertEqual(plan['summary'], self.summary)
         self.assertEqual(plan['row_operations'], sync.estimate_writes(self.patch)[0])
-        self.assertIn('budget', plan['validation_error'])
+        self.assertIn('D1 statement limit', plan['validation_error'])
         with self.assertRaisesRegex(sync.SyncError, 'Blocked publication plan'):
             workflow.archive_run(self.repo, self.workspace)
         with self.assertRaisesRegex(sync.SyncError, 'Blocked publication plan'):
             workflow.publish_run(self.client, self.repo, self.workspace)
         self.assertEqual(self.client.batch_count, 0)
         self.assertEqual(self.client.release()['snapshot_commit'], self.old_commit)
+
+    def test_publish_failure_is_audited_and_retry_plans_from_the_old_snapshot(self):
+        self.prepare()
+        workflow.archive_run(self.repo, self.workspace)
+        self.client.fail_at = 7
+        self.client.fail_error = RuntimeError('Cloudflare quota exhausted')
+        with self.assertRaises(sync.SyncError):
+            workflow.publish_run(self.client, self.repo, self.workspace)
+        result = json.loads((self.workspace / 'publish-result.json').read_text())
+        self.assertEqual(result['status'], 'not_committed')
+        self.assertTrue(result['publication_attempted'])
+        self.assertIn('quota exhausted', result['error'])
+        self.assertEqual(result['active_snapshot_commit'], self.old_commit)
+        self.client.fail_at = None
+        self.prepare()
+        workflow.archive_run(self.repo, self.workspace)
+        self.assertEqual(workflow.publish_run(self.client, self.repo, self.workspace)['status'], 'committed')
+        self.assertEqual(snapshots.read_state(self.old), self.new_state)
+
+    def test_unknown_publish_outcome_is_audited_without_another_write(self):
+        self.prepare()
+        workflow.archive_run(self.repo, self.workspace)
+        self.client.lose_response = True
+        original = self.client.current
+        calls = 0
+        def unavailable_after_commit(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls > 1:
+                raise TimeoutError('Read unavailable')
+            return original(*args, **kwargs)
+        with patch.object(self.client, 'current', side_effect=unavailable_after_commit):
+            with self.assertRaises(sync.SyncError):
+                workflow.publish_run(self.client, self.repo, self.workspace)
+        result = json.loads((self.workspace / 'publish-result.json').read_text())
+        self.assertEqual(result['status'], 'outcome_unknown')
+        self.assertEqual(self.client.batch_count, 1)
 
     def test_failure_keeps_old_pointer_and_retry_reuses_unpublished_candidate(self):
         self.prepare()
@@ -88,6 +126,9 @@ class WorkflowPublishingTests(PublishingFixture):
         with self.assertRaisesRegex(sync.SyncError, 'archived'):
             workflow.publish_run(self.client, self.repo, self.workspace)
         self.assertEqual(self.client.batch_count, 0)
+        result = json.loads((self.workspace / 'publish-result.json').read_text())
+        self.assertEqual(result['status'], 'blocked')
+        self.assertFalse(result['publication_attempted'])
 
     def test_failed_git_push_keeps_d1_unchanged(self):
         self.prepare()

@@ -18,6 +18,7 @@ class LocalD1(sync.D1Client):
         self.db.row_factory = sqlite3.Row
         self.db.execute('PRAGMA foreign_keys=ON')
         self.fail_at = None
+        self.fail_error = RuntimeError('Injected batch failure')
         self.lose_response = False
         self.before_batch = None
         self.batch_count = 0
@@ -42,7 +43,7 @@ class LocalD1(sync.D1Client):
         try:
             for n, item in enumerate(statements):
                 if n == self.fail_at:
-                    raise RuntimeError('Injected batch failure')
+                    raise self.fail_error
                 cursor = self.db.execute(item['sql'], item.get('params', []))
                 rows = [dict(row) for row in cursor] if cursor.description else []
                 results.append({'success': True, 'results': rows, 'meta': {}})
@@ -130,8 +131,8 @@ class PublishingFixture(unittest.TestCase):
         self.assertEqual(self.client.revision(), 0)
         self.assertEqual(self.client.query('SELECT * FROM OierSyncBudget'), [])
 
-    def publish(self, limits=None):
-        return sync.publish(self.client, self.base, 0, self.patch, self.target, limits or sync.Limits())
+    def publish(self):
+        return sync.publish(self.client, self.base, 0, self.patch, self.target)
 
 
 class IncrementalPublishingTests(PublishingFixture):
@@ -150,21 +151,21 @@ class IncrementalPublishingTests(PublishingFixture):
                 with self.assertRaisesRegex(sync.SyncError, 'D1 statement limit'):
                     sync.validate_packet([statement])
 
-    def test_release_above_previous_5000_row_limit_remains_atomic_and_idempotent(self):
+    def test_release_above_previous_write_budget_remains_atomic_and_idempotent(self):
         rows = {table: [dict(row) for row in data] for table, data in OLD_ROWS.items()}
-        rows['OIer'].extend(dict(rows['OIer'][0], uid=uid) for uid in range(3, 6003))
+        rows['OIer'].extend(dict(rows['OIer'][0], uid=uid) for uid in range(3, 18003))
         large_database = self.root / 'large.db'
         large_state = snapshots.write_core_database(large_database, rows)
         manifest = archive_fixture(large_database, self.root / 'archive-large', '4' * 40, 'b' * 64)
         self.patch, self.summary = sync.diff_states(self.old_state, large_state)
         operations, estimate = sync.estimate_writes(self.patch)
-        self.assertEqual(operations, 6000)
-        self.assertGreater(estimate, 35000)
+        self.assertEqual(operations, 18000)
+        self.assertGreater(estimate, 100000)
         self.target = sync.publication_values(manifest, '5' * 40, source_sha='4' * 40,
             source_hash='b' * 64, worker_version='2' * 40,
             run_url='https://example.invalid/large', revision=operations)
 
-        commands = sync.build_transaction(self.base, 0, self.patch, self.target, sync.Limits())
+        commands = sync.build_transaction(self.base, 0, self.patch, self.target)
         self.client.fail_at = len(commands) - 1
         with self.assertRaises(sync.SyncError):
             self.publish()
@@ -188,7 +189,7 @@ class IncrementalPublishingTests(PublishingFixture):
         self.assertEqual(self.client.batch_count, 1)
 
     def test_failure_at_every_statement_rolls_back_data_revision_budget_and_pointer(self):
-        commands = sync.build_transaction(self.base, 0, self.patch, self.target, sync.Limits())
+        commands = sync.build_transaction(self.base, 0, self.patch, self.target)
         for n in range(len(commands)):
             with self.subTest(statement=n):
                 self.client.fail_at = n
@@ -200,6 +201,43 @@ class IncrementalPublishingTests(PublishingFixture):
         self.client.lose_response = True
         self.assertEqual(self.publish()['status'], 'committed_response_lost')
         self.assertEqual(snapshots.read_state(self.old), self.new_state)
+        self.assertEqual(self.client.batch_count, 1)
+
+    def test_quota_failure_rolls_back_and_records_the_confirmed_old_release(self):
+        self.client.fail_at = 7
+        self.client.fail_error = RuntimeError("Your account has exceeded D1's free tier daily row write limit.")
+        with self.assertRaises(sync.SyncError) as error:
+            self.publish()
+        self.assert_old()
+        self.assertEqual(self.client.batch_count, 1)
+        self.assertEqual(error.exception.result['status'], 'not_committed')
+        self.assertIn('daily row write limit', error.exception.result['error'])
+        self.assertEqual(error.exception.result['active_snapshot_commit'], self.base['snapshot_commit'])
+
+    def test_failed_verification_after_success_is_unknown_and_never_resends(self):
+        original = self.client.current
+        calls = 0
+        def unavailable_after_commit(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls > 1:
+                raise TimeoutError('Verification unavailable')
+            return original(*args, **kwargs)
+        with patch.object(self.client, 'current', side_effect=unavailable_after_commit):
+            with self.assertRaises(sync.SyncError) as error:
+                self.publish()
+        self.assertEqual(error.exception.result['status'], 'outcome_unknown')
+        self.assertTrue(error.exception.result['publication_attempted'])
+        self.assertEqual(self.client.batch_count, 1)
+        self.assertEqual(self.client.release()['snapshot_commit'], self.target['snapshot_commit'])
+
+    def test_missing_response_telemetry_cannot_hide_a_confirmed_commit(self):
+        real_batch = self.client.batch
+        def no_telemetry(commands):
+            real_batch(commands)
+            return None
+        with patch.object(self.client, 'batch', side_effect=no_telemetry):
+            self.assertEqual(self.publish()['status'], 'committed_telemetry_incomplete')
         self.assertEqual(self.client.batch_count, 1)
 
     def test_manual_core_write_detected_even_when_release_identity_matches(self):
@@ -286,30 +324,20 @@ class IncrementalPublishingTests(PublishingFixture):
             self.publish()
         self.assertEqual(self.client.batch_count, 0)
 
-    def test_budget_rejection_and_exhausted_daily_budget_leave_old_release(self):
-        with self.assertRaisesRegex(sync.SyncError, 'budget'):
-            self.publish(sync.Limits(max_estimated_writes=1))
-        self.assert_old()
-        self.client.db.execute("INSERT INTO OierSyncBudget VALUES(date('now'),?)", [sync.Limits().daily_write_budget])
-        with self.assertRaises(sync.SyncError):
-            self.publish()
-        self.assertEqual(snapshots.read_state(self.old), self.old_state)
-        self.assertEqual(self.client.revision(), 0)
-        self.assertEqual(self.client.release()['snapshot_commit'], self.base['snapshot_commit'])
-
-    def test_daily_budget_can_use_the_full_cloudflare_free_allowance(self):
+    def test_legacy_budget_settings_and_counters_do_not_block_publication(self):
         _, estimate = sync.estimate_writes(self.patch)
-        self.client.db.execute("INSERT INTO OierSyncBudget VALUES(date('now'),?)", [100000 - estimate])
-        self.assertEqual(self.publish()['status'], 'committed')
+        self.client.db.execute("INSERT INTO OierSyncBudget VALUES(date('now'),1000000)")
+        with patch.dict('os.environ', D1_SYNC_MAX_ESTIMATED_WRITES='1', D1_SYNC_DAILY_WRITE_BUDGET='1'):
+            self.assertEqual(self.publish()['status'], 'committed')
         self.assertEqual(self.client.query('SELECT estimated_writes FROM OierSyncBudget'),
-                         [{'estimated_writes': 100000}])
+                         [{'estimated_writes': 1000000 + estimate}])
 
     def test_empty_delta_only_advances_metadata(self):
         empty, _ = sync.diff_states(self.old_state, self.old_state)
         self.client.db.execute("UPDATE DataRelease SET activated_at='2000-01-01 00:00:00' WHERE id=1")
         target = {k: v for k, v in self.base.items() if k in sync.RELEASE_FIELDS or k == 'github_run_url'}
         target['upstream_sha'] = '6' * 40
-        sync.publish(self.client, self.base, 0, empty, target, sync.Limits())
+        sync.publish(self.client, self.base, 0, empty, target)
         self.assertEqual(self.client.revision(), 0)
         self.assertEqual(snapshots.read_state(self.old), self.old_state)
         self.assertEqual(self.client.release()['snapshot_commit'], self.base['snapshot_commit'])

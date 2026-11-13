@@ -1,7 +1,5 @@
 """Fail-closed D1 delta publishing and transaction assertions."""
 
-from dataclasses import dataclass
-import os
 from pathlib import Path
 import re
 
@@ -37,26 +35,9 @@ MIGRATION = snapshots.ROOT / 'cloudflare/migrations/0004_incremental_sync.sql'
 
 
 class SyncError(RuntimeError):
-    pass
-
-
-@dataclass(frozen=True)
-class Limits:
-    # Cloudflare D1 Free includes 100,000 written rows per account per UTC day.
-    max_estimated_writes: int = 100000
-    daily_write_budget: int = 100000
-
-    @classmethod
-    def from_env(cls):
-        values = {}
-        for field, env in (('max_estimated_writes', 'D1_SYNC_MAX_ESTIMATED_WRITES'),
-                           ('daily_write_budget', 'D1_SYNC_DAILY_WRITE_BUDGET')):
-            if env in os.environ:
-                values[field] = int(os.environ[env])
-        result = cls(**values)
-        if any(value <= 0 or value > 9007199254740991 for value in vars(result).values()):
-            raise ValueError('Invalid incremental publishing limits')
-        return result
+    def __init__(self, message, *, result=None):
+        super().__init__(message)
+        self.result = result
 
 
 def expected_triggers():
@@ -120,7 +101,7 @@ class D1Client:
         expected_indexes = {name: (table, columns) for table, names in INDEX_NAMES.items()
                             for name, columns in zip(names, INDEXES[table])}
         if {row['name'] for row in index_rows} != expected_indexes.keys():
-            raise SyncError('Core indexes differ from the reviewed write budget; do not rebuild indexes automatically')
+            raise SyncError('Core indexes differ from the expected schema; do not rebuild indexes automatically')
         for row in index_rows:
             table, columns = expected_indexes[row['name']]
             match = re.search(r'\bON\s+["\[]?(\w+)["\]]?\s*\(([^)]+)\)', row['sql'] or '', re.IGNORECASE)
@@ -190,7 +171,7 @@ def diff_states(old, new):
 
 def estimate_writes(patch):
     # Table + revision trigger + two assertion writes, plus conservative index
-    # delete/insert costs. This is a budget estimate, not D1 billing telemetry.
+    # delete/insert costs. This is audit telemetry, never a publishing limit.
     estimate, operations = 20, 0
     for table, changes in patch.items():
         for kind, rows in changes.items():
@@ -295,18 +276,14 @@ def validate_packet(statements):
             raise SyncError('Delta exceeds a D1 statement limit; publishing stopped')
 
 
-def build_transaction(base, base_revision, patch, target, limits):
+def build_transaction(base, base_revision, patch, target):
     if set(target) != set(RELEASE_FIELDS) | {'github_run_url'}:
         raise SyncError('Unexpected publication metadata fields')
     operations, estimate = estimate_writes(patch)
-    if estimate > limits.max_estimated_writes:
-        raise SyncError(f'Delta exceeds the atomic publishing budget ({operations} row operations, {estimate} estimated writes); no full-upload fallback')
     if target['core_revision'] != base_revision + operations:
         raise SyncError('Incorrect target core revision')
-    commands = [release_assertion(base, base_revision), assertion(
-        "COALESCE((SELECT estimated_writes FROM OierSyncBudget WHERE day=date('now')),0)+?<=?",
-        [estimate, limits.daily_write_budget],
-    ), statement('UPDATE OierSyncState SET writing=1 WHERE id=1 AND writing=0'),
+    commands = [release_assertion(base, base_revision),
+        statement('UPDATE OierSyncState SET writing=1 WHERE id=1 AND writing=0'),
         assertion('changes()=1 AND (SELECT writing FROM OierSyncState WHERE id=1)=1')]
     for table in ('School', 'Contest', 'OIer'):
         for kind in ('insert', 'update'):
@@ -323,7 +300,6 @@ def build_transaction(base, base_revision, patch, target, limits):
         statement('UPDATE OierSyncState SET writing=0 WHERE id=1 AND writing=1'),
         assertion('changes()=1 AND (SELECT writing FROM OierSyncState WHERE id=1)=0'),
         statement("INSERT INTO OierSyncBudget(day,estimated_writes) VALUES(date('now'),?) ON CONFLICT(day) DO UPDATE SET estimated_writes=estimated_writes+excluded.estimated_writes", [estimate]),
-        assertion("(SELECT estimated_writes FROM OierSyncBudget WHERE day=date('now'))<=?", [limits.daily_write_budget]),
         release_update(target, activate=operations > 0),
         release_assertion(target, target['core_revision']),
     ]
@@ -331,7 +307,7 @@ def build_transaction(base, base_revision, patch, target, limits):
     return commands
 
 
-def publish(client, base, base_revision, patch, target, limits):
+def publish(client, base, base_revision, patch, target):
     if target.get('snapshot_commit') == '0' * 40:
         raise SyncError('Unarchived candidate cannot be published')
     current, revision = client.current()
@@ -339,32 +315,55 @@ def publish(client, base, base_revision, patch, target, limits):
         return {'status': 'already_applied', 'core_revision': revision}
     if release_identity(current) != release_identity(base) or revision != base_revision:
         raise SyncError('Active release changed after planning; refusing a stale delta')
-    commands = build_transaction(base, base_revision, patch, target, limits)
+    commands = build_transaction(base, base_revision, patch, target)
+    batch_error = None
     try:
         response = client.batch(commands)
     except Exception as error:
-        # Never blindly retry a write after a network timeout or uncertain response.
-        try:
-            actual, revision = client.current()
-        except Exception:
-            raise SyncError('Publish outcome is unknown. Re-read DataRelease before any retry; no further writes were attempted.') from error
-        if release_identity(actual) == release_identity(target):
-            return {'status': 'committed_response_lost', 'core_revision': revision}
-        if release_identity(actual) == release_identity(base) and revision == base_revision:
-            raise SyncError('Publish did not commit; the previous release and snapshot remain active') from error
-        raise SyncError('Unexpected release after an uncertain publish; operator audit required') from error
-    actual, revision = client.current()
+        batch_error = error
+    # Read after either success or failure. A missing acknowledgement is never
+    # grounds to resend the write, and a failed verification is not a rollback.
+    try:
+        actual, revision = client.current()
+    except Exception as verification_error:
+        raise SyncError(
+            'Publish outcome is unknown. Re-read DataRelease before any retry; no further writes were attempted.',
+            result={'status': 'outcome_unknown', 'publication_attempted': True,
+                    'error': str(batch_error or verification_error),
+                    'verification_error': str(verification_error),
+                    'recovery_action': 'Verify the active D1 release before another publication.'},
+        ) from (batch_error or verification_error)
+    if release_identity(actual) == release_identity(base) and revision == base_revision:
+        raise SyncError(
+            'Publish did not commit; the previous release and snapshot remain active',
+            result={'status': 'not_committed', 'publication_attempted': True,
+                    'core_revision': revision, 'active_snapshot_commit': actual['snapshot_commit'],
+                    'error': str(batch_error) if batch_error else 'D1 did not activate the target release.',
+                    'recovery_action': 'Keep the current release; the next run will inspect and plan again.'},
+        ) from batch_error
     if release_identity(actual) != release_identity(target):
-        raise SyncError('Publish response did not match the active release; stop and audit before retrying')
-    results = response.get('result', [])
-    if len(results) != len(commands) or any(not r.get('success') for r in results):
+        raise SyncError(
+            'Unexpected release after publication; stop and audit before retrying',
+            result={'status': 'conflict', 'publication_attempted': True,
+                    'core_revision': revision, 'active_snapshot_commit': actual['snapshot_commit'],
+                    'error': str(batch_error) if batch_error else 'D1 release differs from both base and target.',
+                    'recovery_action': 'Audit the active release before another publication.'},
+        ) from batch_error
+    if batch_error is not None:
+        return {'status': 'committed_response_lost', 'core_revision': revision}
+    results = response.get('result', []) if isinstance(response, dict) else []
+    if not isinstance(results, list) or len(results) != len(commands) or any(
+        not isinstance(r, dict) or not r.get('success') for r in results
+    ):
         # The committed marker is authoritative even if response telemetry is absent.
         return {'status': 'committed_telemetry_incomplete', 'core_revision': revision}
-    return {
-        'status': 'committed', 'core_revision': revision,
-        'rows_read': sum(r.get('meta', {}).get('rows_read', 0) for r in results),
-        'rows_written': sum(r.get('meta', {}).get('rows_written', 0) for r in results),
-    }
+    try:
+        rows_read = sum(r.get('meta', {}).get('rows_read', 0) for r in results)
+        rows_written = sum(r.get('meta', {}).get('rows_written', 0) for r in results)
+    except (AttributeError, TypeError):
+        return {'status': 'committed_telemetry_incomplete', 'core_revision': revision}
+    return {'status': 'committed', 'core_revision': revision,
+            'rows_read': rows_read, 'rows_written': rows_written}
 
 
 def bootstrap(client, archive_store, workspace, stats_generator):
@@ -407,5 +406,5 @@ def bootstrap(client, archive_store, workspace, stats_generator):
     target = publication_values(manifest, commit, source_sha=base['upstream_sha'], source_hash=base['source_data_hash'],
         worker_version=base.get('worker_version'), run_url=base.get('github_run_url'), revision=revision)
     empty_patch = {table: {'insert': [], 'update': [], 'delete': []} for table, _ in legacy.TABLES}
-    publish(client, base, revision, empty_patch, target, Limits())
+    publish(client, base, revision, empty_patch, target)
     return client.current()[0]

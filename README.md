@@ -246,20 +246,29 @@ manifest.json        # 文件校验、业务数据校验、入库规则版本、
 直接写入会被拒绝；发布器在同一事务中开启门禁、写入并关闭门禁。每次增删改都会
 在同一事务里推进计数。
 线上计数与成功快照不符、保护表/触发器/索引被改动时停止发布。每条差量都有旧值、
-唯一性和写入结果断言，数据、发布指针和日写入预算一起提交或回滚。
+唯一性和写入结果断言，数据、发布指针和估算写入记账一起提交或回滚。
 命令行入口会核对目标库与 Worker 的 `DB` 绑定一致；计划还绑定具体账号和数据库，
 防止准备后更换环境把差量写到另一个库。
 
-默认单次及每 UTC 日的预算均为 100,000 估算写入，对齐
-[Cloudflare D1 免费档每日写入额度](https://developers.cloudflare.com/d1/platform/pricing/)。
-可通过工作流的 `D1_SYNC_MAX_ESTIMATED_WRITES`、`D1_SYNC_DAILY_WRITE_BUDGET` 调整。
-不再额外限制业务行操作数或设置 4 MiB 请求阈值；每条 SQL 仍校验 D1 的
+项目不设置单次或每日写入额度，也不额外限制业务行操作数或设置 4 MiB 请求阈值。
+计划中的估算写入及历史命名为 `OierSyncBudget` 的日累计记录仅用于审计，不拦截发布；
+旧的 `D1_SYNC_MAX_ESTIMATED_WRITES`、`D1_SYNC_DAILY_WRITE_BUDGET` 配置已移除。
+每条 SQL 仍校验 D1 的
 100,000 字节及 100 个绑定参数限制，整批请求受服务端 30 秒执行时限等
 [平台限制](https://developers.cloudflare.com/d1/platform/limits/)约束。
-估算包含断言、变更计数和索引开销，不等同 Cloudflare 账单，也不包含其他服务的用量；
-Cloudflare 实际额度由账号内所有 D1 数据库共享，每天 UTC 00:00（北京时间 08:00）重置。
-超出预算保持旧版，不自动拆成多个正式表事务或回退全量上传。
-预算检查未通过时也会保存差量计划和拒绝原因，供工作流摘要及审计 artifact 排查。
+估算包含断言、变更计数和索引开销，不等同 Cloudflare 账单。实际可用额度由
+[Cloudflare 套餐与账号总用量](https://developers.cloudflare.com/d1/platform/pricing/)决定。
+校验失败或 Cloudflare 拒绝写入时保留失败记录，不拆分正式表事务或回退全量上传。
+`publish-result.json` 和工作流摘要会区分以下状态：
+
+- `blocked`：发布前校验失败，未尝试写核心表。
+- `not_committed`：写入失败后已重新读取并确认旧发布仍有效，下次从该成功快照重新规划。
+- `outcome_unknown`：超时或响应异常后暂时无法确认结果，停止写入；后续先读取 D1 发布记录再决定是否更新。
+- `conflict`：核验到非预期的发布身份，停止并要求审计。
+- `committed_response_lost`：响应丢失，但重新读取确认目标已提交，不重复写入。
+
+失败的 job 保持失败状态，同时保存计划、错误和恢复建议。Cloudflare 配额耗尽时不立即循环重试；
+下次每日任务会先核验线上发布状态，再从实际成功版本比较上游。
 
 数据分支采用普通追加提交，不强推或自动改写历史。旧快照属于 Git 历史；保留策略
 需要另行规划，必须保留 D1 当前引用的 commit。Runner 的 SQLite 与下载快照在
