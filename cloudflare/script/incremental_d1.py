@@ -1,7 +1,9 @@
 """Fail-closed D1 delta publishing and transaction assertions."""
 
 from pathlib import Path
+import random
 import re
+import time
 
 if __package__:
     from . import sync_snapshot as snapshots
@@ -308,13 +310,46 @@ def build_transaction(base, base_revision, patch, target):
 
 
 def publish(client, base, base_revision, patch, target):
+    # Retry only a known transient error after read-back proved no commit.
+    # The transaction's base/revision guard also protects against a late commit.
+    for attempt in range(1, 4):
+        try:
+            result = _publish_once(client, base, base_revision, patch, target)
+        except Exception as error:
+            outcome = getattr(error, 'result', None)
+            if outcome:
+                outcome['attempts'] = attempt
+                if attempt > 1:
+                    outcome['publication_attempted'] = True
+            elif attempt > 1:
+                raise SyncError(
+                    'Cannot verify the release before retrying; no further writes were attempted.',
+                    result={'status': 'outcome_unknown', 'publication_attempted': True,
+                            'attempts': attempt - 1, 'error': str(error),
+                            'recovery_action': 'Verify the active D1 release before another publication.'},
+                ) from error
+            cause = error.__cause__
+            if (attempt == 3 or not outcome or outcome['status'] != 'not_committed'
+                    or not legacy.is_retryable_d1_error(cause)):
+                raise
+            time.sleep(2 ** attempt + random.uniform(0, 1))
+        else:
+            result['attempts'] = attempt
+            return result
+
+
+def _publish_once(client, base, base_revision, patch, target):
     if target.get('snapshot_commit') == '0' * 40:
         raise SyncError('Unarchived candidate cannot be published')
     current, revision = client.current()
     if release_identity(current) == release_identity(target):
         return {'status': 'already_applied', 'core_revision': revision}
     if release_identity(current) != release_identity(base) or revision != base_revision:
-        raise SyncError('Active release changed after planning; refusing a stale delta')
+        raise SyncError('Active release changed after planning; refusing a stale delta',
+            result={'status': 'conflict', 'publication_attempted': False,
+                    'core_revision': revision, 'active_snapshot_commit': current['snapshot_commit'],
+                    'error': 'The planned base release is stale.',
+                    'recovery_action': 'Rerun inspection and planning from the active release.'})
     commands = build_transaction(base, base_revision, patch, target)
     batch_error = None
     try:

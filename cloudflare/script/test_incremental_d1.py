@@ -214,6 +214,45 @@ class IncrementalPublishingTests(PublishingFixture):
         self.assertIn('daily row write limit', error.exception.result['error'])
         self.assertEqual(error.exception.result['active_snapshot_commit'], self.base['snapshot_commit'])
 
+    def test_transient_7500_error_retries_after_confirmed_rollback(self):
+        self.client.fail_at = 7
+        self.client.fail_error = legacy.D1RequestError('Cloudflare D1 HTTP 500: internal error', 500, [{'code': 7500}])
+        real_batch = self.client.batch
+        def fail_once(commands):
+            if self.client.batch_count:
+                self.client.fail_at = None
+            return real_batch(commands)
+        with patch.object(self.client, 'batch', side_effect=fail_once), patch.object(sync.time, 'sleep') as sleep:
+            result = self.publish()
+        self.assertEqual(result['status'], 'committed')
+        self.assertEqual(result['attempts'], 2)
+        sleep.assert_called_once()
+        self.assertEqual(self.client.batch_count, 2)
+        self.assertEqual(snapshots.read_state(self.old), self.new_state)
+        self.assertEqual(self.client.revision(), self.target['core_revision'])
+
+    def test_persistent_internal_error_stops_after_three_confirmed_failures(self):
+        self.client.fail_at = 7
+        self.client.fail_error = legacy.D1RequestError('Cloudflare D1 HTTP 500: internal error', 500, [{'code': 7500}])
+        with patch.object(sync.time, 'sleep') as sleep:
+            with self.assertRaises(sync.SyncError) as error:
+                self.publish()
+        self.assertEqual(error.exception.result['status'], 'not_committed')
+        self.assertEqual(error.exception.result['attempts'], 3)
+        self.assertEqual(self.client.batch_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+        self.assert_old()
+
+    def test_cloudflare_quota_errors_are_not_immediately_retried(self):
+        self.client.fail_at = 7
+        self.client.fail_error = legacy.D1RequestError('D1 daily row write limit exceeded', 500, [{'code': 7500}])
+        with patch.object(sync.time, 'sleep') as sleep:
+            with self.assertRaises(sync.SyncError):
+                self.publish()
+        sleep.assert_not_called()
+        self.assertEqual(self.client.batch_count, 1)
+        self.assert_old()
+
     def test_failed_verification_after_success_is_unknown_and_never_resends(self):
         original = self.client.current
         calls = 0

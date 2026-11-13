@@ -11,6 +11,25 @@ from tqdm import tqdm
 REQUEST_TIMEOUT_SECONDS = 60
 STAGING_SUFFIX = "__staging"
 
+
+class D1RequestError(RuntimeError):
+    def __init__(self, message, status_code, errors=()):
+        super().__init__(message)
+        self.status_code = status_code
+        self.errors = errors if isinstance(errors, (list, tuple)) else ()
+
+
+def is_retryable_d1_error(error):
+    if isinstance(error, (requests.Timeout, requests.ConnectionError)):
+        return True
+    if not isinstance(error, D1RequestError):
+        return False
+    message = str(error).lower()
+    if any(text in message for text in ('daily row', 'quota', 'limit exceeded', 'maximum account storage')):
+        return False
+    codes = {item.get('code') for item in error.errors if isinstance(item, dict)}
+    return error.status_code in (429, 500, 502, 503, 504) and (not codes or bool(codes & {7429, 7500}))
+
 TABLES = [
     ("OIer", ["uid", "name", "initials", "gender", "enroll_middle", "oierdb_score", "ccf_score", "ccf_level"]),
     ("Contest", ["id", "name", "type", "year", "fall_semester", "full_score"]),
@@ -199,10 +218,10 @@ def _execute_d1_request(cfg, endpoint, payload):
     try:
         data = response.json()
     except ValueError:
-        raise RuntimeError(f"Cloudflare D1 returned HTTP {response.status_code} without JSON") from None
+        raise D1RequestError(f"Cloudflare D1 returned HTTP {response.status_code} without JSON", response.status_code) from None
     if not response.ok:
         errors = data.get('errors', [])
-        raise RuntimeError(f"Cloudflare D1 HTTP {response.status_code}: {errors}")
+        raise D1RequestError(f"Cloudflare D1 HTTP {response.status_code}: {errors}", response.status_code, errors)
     if not data.get("success", False):
         raise RuntimeError(f"Cloudflare D1 API 请求失败: {data.get('errors', data)}")
 

@@ -5,6 +5,17 @@ from cloudflare.script import upload_to_d1
 
 
 class ReleaseMetadataTests(unittest.TestCase):
+    @patch.object(upload_to_d1.requests, 'post')
+    def test_internal_errors_keep_retry_classification_without_resending_http_requests(self, post):
+        post.return_value.ok = False
+        post.return_value.status_code = 500
+        post.return_value.json.return_value = {'errors': [{'code': 7500, 'message': 'internal error'}]}
+        cfg = {'cloudflare': {'account_id': 'test-account', 'database_id': 'test-database', 'api_token': 'test-token'}}
+        with self.assertRaises(upload_to_d1.D1RequestError) as error:
+            upload_to_d1._execute_d1_request(cfg, 'query', {'sql': 'SELECT 1'})
+        self.assertTrue(upload_to_d1.is_retryable_d1_error(error.exception))
+        post.assert_called_once()
+
     @patch.object(upload_to_d1, 'execute_d1_batch')
     @patch.object(upload_to_d1, '_execute_d1_request')
     @patch.object(upload_to_d1, 'get_release')
