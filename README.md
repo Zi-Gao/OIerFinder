@@ -201,7 +201,7 @@ D1。该同步是公开写操作；历史奖项不会因为洛谷当前页面缺
 [`.github/workflows/sync-oier-data.yml`](.github/workflows/sync-oier-data.yml)
 在以下情况运行：
 
-- 每 6 小时检查一次上游默认分支。
+- 每天北京时间 09:17（UTC 01:17）检查一次上游默认分支。
 - 从 GitHub Actions 页面手动运行，可指定完整上游 SHA 或强制重新生成和比较。
 - `main` 分支中的 Worker、迁移、数据脚本或工作流发生变化。
 
@@ -250,11 +250,15 @@ manifest.json        # 文件校验、业务数据校验、入库规则版本、
 命令行入口会核对目标库与 Worker 的 `DB` 绑定一致；计划还绑定具体账号和数据库，
 防止准备后更换环境把差量写到另一个库。
 
-默认每次最多 5,000 行操作、35,000 估算写入，每 UTC 日最多 75,000 估算同步写入，
-单次请求最多 4 MiB。可通过工作流的 `D1_SYNC_MAX_OPERATIONS`、
-`D1_SYNC_MAX_ESTIMATED_WRITES`、`D1_SYNC_DAILY_WRITE_BUDGET` 调整。估算包含断言、
-变更计数和索引开销，不等同 Cloudflare 账单，也不包含其他服务的用量。超出预算
-保持旧版，不自动拆成多个正式表事务或回退全量上传。
+默认单次及每 UTC 日的预算均为 100,000 估算写入，对齐
+[Cloudflare D1 免费档每日写入额度](https://developers.cloudflare.com/d1/platform/pricing/)。
+可通过工作流的 `D1_SYNC_MAX_ESTIMATED_WRITES`、`D1_SYNC_DAILY_WRITE_BUDGET` 调整。
+不再额外限制业务行操作数或设置 4 MiB 请求阈值；每条 SQL 仍校验 D1 的
+100,000 字节及 100 个绑定参数限制，整批请求受服务端 30 秒执行时限等
+[平台限制](https://developers.cloudflare.com/d1/platform/limits/)约束。
+估算包含断言、变更计数和索引开销，不等同 Cloudflare 账单，也不包含其他服务的用量；
+Cloudflare 实际额度由账号内所有 D1 数据库共享，每天 UTC 00:00（北京时间 08:00）重置。
+超出预算保持旧版，不自动拆成多个正式表事务或回退全量上传。
 预算检查未通过时也会保存差量计划和拒绝原因，供工作流摘要及审计 artifact 排查。
 
 数据分支采用普通追加提交，不强推或自动改写历史。旧快照属于 Git 历史；保留策略

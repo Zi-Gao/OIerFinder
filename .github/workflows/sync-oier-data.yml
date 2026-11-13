@@ -2,7 +2,7 @@ name: Sync OIer data to Cloudflare
 
 on:
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "17 1 * * *" # Daily at 09:17 Asia/Shanghai (01:17 UTC).
   workflow_dispatch:
     inputs:
       force:
@@ -49,9 +49,8 @@ jobs:
       CLOUDFLARE_DATABASE_ID: ${{ secrets.CLOUDFLARE_DATABASE_ID }}
       CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
       PYTHONDONTWRITEBYTECODE: "1"
-      D1_SYNC_MAX_OPERATIONS: "5000"
-      D1_SYNC_MAX_ESTIMATED_WRITES: "35000"
-      D1_SYNC_DAILY_WRITE_BUDGET: "75000"
+      D1_SYNC_MAX_ESTIMATED_WRITES: "100000"
+      D1_SYNC_DAILY_WRITE_BUDGET: "100000"
 
     steps:
       - name: Configure temporary workspace

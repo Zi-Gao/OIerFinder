@@ -135,23 +135,31 @@ class PublishingFixture(unittest.TestCase):
 
 
 class IncrementalPublishingTests(PublishingFixture):
-    def test_request_size_guard_counts_the_actual_http_json_encoding(self):
-        statements = [sync.statement('SELECT ?', ['北京'])]
-        utf8_bytes = len(json.dumps({'batch': statements}, ensure_ascii=False).encode())
-        with patch.object(sync, 'MAX_REQUEST_BYTES', utf8_bytes):
-            with self.assertRaisesRegex(sync.SyncError, 'request size budget'):
-                sync.validate_packet(statements)
+    def test_batch_can_exceed_the_previous_4_mib_project_threshold(self):
+        statements = [sync.statement('SELECT ?', ['x' * 90000]) for _ in range(50)]
+        self.assertGreater(len(json.dumps({'batch': statements}).encode()), 4 * 1024 * 1024)
+        sync.validate_packet(statements)
 
-    def test_release_with_3344_changes_remains_atomic_and_idempotent(self):
+    def test_cloudflare_statement_byte_and_parameter_limits_still_apply(self):
+        sync.validate_packet([sync.statement('--' + 'x' * 99998)])
+        sync.validate_packet([sync.statement('SELECT ' + ','.join('?' for _ in range(100)), range(100))])
+        for statement in (sync.statement('--' + 'x' * 99999),
+                          sync.statement('北' * 33334),
+                          sync.statement('SELECT ?', range(101))):
+            with self.subTest(statement_bytes=len(statement['sql'].encode())):
+                with self.assertRaisesRegex(sync.SyncError, 'D1 statement limit'):
+                    sync.validate_packet([statement])
+
+    def test_release_above_previous_5000_row_limit_remains_atomic_and_idempotent(self):
         rows = {table: [dict(row) for row in data] for table, data in OLD_ROWS.items()}
-        rows['OIer'].extend(dict(rows['OIer'][0], uid=uid) for uid in range(3, 3347))
+        rows['OIer'].extend(dict(rows['OIer'][0], uid=uid) for uid in range(3, 6003))
         large_database = self.root / 'large.db'
         large_state = snapshots.write_core_database(large_database, rows)
         manifest = archive_fixture(large_database, self.root / 'archive-large', '4' * 40, 'b' * 64)
         self.patch, self.summary = sync.diff_states(self.old_state, large_state)
         operations, estimate = sync.estimate_writes(self.patch)
-        self.assertEqual(operations, 3344)
-        self.assertGreater(estimate, 15000)
+        self.assertEqual(operations, 6000)
+        self.assertGreater(estimate, 35000)
         self.target = sync.publication_values(manifest, '5' * 40, source_sha='4' * 40,
             source_hash='b' * 64, worker_version='2' * 40,
             run_url='https://example.invalid/large', revision=operations)
@@ -280,14 +288,21 @@ class IncrementalPublishingTests(PublishingFixture):
 
     def test_budget_rejection_and_exhausted_daily_budget_leave_old_release(self):
         with self.assertRaisesRegex(sync.SyncError, 'budget'):
-            self.publish(sync.Limits(max_operations=1))
+            self.publish(sync.Limits(max_estimated_writes=1))
         self.assert_old()
-        self.client.db.execute("INSERT INTO OierSyncBudget VALUES(date('now'),75000)")
+        self.client.db.execute("INSERT INTO OierSyncBudget VALUES(date('now'),?)", [sync.Limits().daily_write_budget])
         with self.assertRaises(sync.SyncError):
             self.publish()
         self.assertEqual(snapshots.read_state(self.old), self.old_state)
         self.assertEqual(self.client.revision(), 0)
         self.assertEqual(self.client.release()['snapshot_commit'], self.base['snapshot_commit'])
+
+    def test_daily_budget_can_use_the_full_cloudflare_free_allowance(self):
+        _, estimate = sync.estimate_writes(self.patch)
+        self.client.db.execute("INSERT INTO OierSyncBudget VALUES(date('now'),?)", [100000 - estimate])
+        self.assertEqual(self.publish()['status'], 'committed')
+        self.assertEqual(self.client.query('SELECT estimated_writes FROM OierSyncBudget'),
+                         [{'estimated_writes': 100000}])
 
     def test_empty_delta_only_advances_metadata(self):
         empty, _ = sync.diff_states(self.old_state, self.old_state)

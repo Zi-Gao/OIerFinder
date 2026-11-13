@@ -46,7 +46,7 @@ class WorkflowPublishingTests(PublishingFixture):
             workflow.prepare_run(self.client, self.repo, self.workspace,
                 database=self.new, stats=self.root / 'archive-new-stats.json',
                 source_hash='b' * 64, worker_version='2' * 40,
-                limits=sync.Limits(max_operations=1), stats_output=self.root / 'worker-stats.json')
+                limits=sync.Limits(max_estimated_writes=1), stats_output=self.root / 'worker-stats.json')
         plan = json.loads((self.workspace / 'plan.json').read_text())
         self.assertEqual(plan['status'], 'blocked')
         self.assertEqual(plan['summary'], self.summary)

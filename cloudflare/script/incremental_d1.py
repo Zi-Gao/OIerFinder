@@ -1,7 +1,6 @@
 """Fail-closed D1 delta publishing and transaction assertions."""
 
 from dataclasses import dataclass
-import json
 import os
 from pathlib import Path
 import re
@@ -34,7 +33,6 @@ INDEX_NAMES = {
     'School': (),
     'Record': ('idx_record_oier_covering', 'idx_record_contest_level_uid', 'idx_record_school_province_level_uid'),
 }
-MAX_REQUEST_BYTES = 4 * 1024 * 1024
 MIGRATION = snapshots.ROOT / 'cloudflare/migrations/0004_incremental_sync.sql'
 
 
@@ -44,20 +42,19 @@ class SyncError(RuntimeError):
 
 @dataclass(frozen=True)
 class Limits:
-    max_operations: int = 5000
-    max_estimated_writes: int = 35000
-    daily_write_budget: int = 75000
+    # Cloudflare D1 Free includes 100,000 written rows per account per UTC day.
+    max_estimated_writes: int = 100000
+    daily_write_budget: int = 100000
 
     @classmethod
     def from_env(cls):
         values = {}
-        for field, env in (('max_operations', 'D1_SYNC_MAX_OPERATIONS'),
-                           ('max_estimated_writes', 'D1_SYNC_MAX_ESTIMATED_WRITES'),
+        for field, env in (('max_estimated_writes', 'D1_SYNC_MAX_ESTIMATED_WRITES'),
                            ('daily_write_budget', 'D1_SYNC_DAILY_WRITE_BUDGET')):
             if env in os.environ:
                 values[field] = int(os.environ[env])
         result = cls(**values)
-        if any(value <= 0 or value > 9007199254740991 for value in vars(result).values()) or result.max_operations > 5000:
+        if any(value <= 0 or value > 9007199254740991 for value in vars(result).values()):
             raise ValueError('Invalid incremental publishing limits')
         return result
 
@@ -296,16 +293,13 @@ def validate_packet(statements):
     for item in statements:
         if len(item['sql'].encode('utf-8')) > 100000 or len(item['params']) > 100:
             raise SyncError('Delta exceeds a D1 statement limit; publishing stopped')
-    # requests encodes json= payloads with ASCII escapes, including Chinese text.
-    if len(json.dumps({'batch': statements}, allow_nan=False).encode()) > MAX_REQUEST_BYTES:
-        raise SyncError('Delta exceeds the atomic request size budget; publishing stopped')
 
 
 def build_transaction(base, base_revision, patch, target, limits):
     if set(target) != set(RELEASE_FIELDS) | {'github_run_url'}:
         raise SyncError('Unexpected publication metadata fields')
     operations, estimate = estimate_writes(patch)
-    if operations > limits.max_operations or estimate > limits.max_estimated_writes:
+    if estimate > limits.max_estimated_writes:
         raise SyncError(f'Delta exceeds the atomic publishing budget ({operations} row operations, {estimate} estimated writes); no full-upload fallback')
     if target['core_revision'] != base_revision + operations:
         raise SyncError('Incorrect target core revision')
