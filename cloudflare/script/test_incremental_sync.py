@@ -160,6 +160,13 @@ class WorkflowPublishingTests(PublishingFixture):
         self.assertFalse(control['should_generate'])
         self.assertFalse(control['should_run'])
 
+    def test_missing_payload_migration_requests_schema_setup_without_data_rebuild(self):
+        self.client.db.execute('DROP TABLE OierSyncPayload')
+        control = workflow.inspect_run(self.client, self.workspace, self.base['upstream_sha'], 'schedule')
+        self.assertTrue(control['needs_schema'])
+        self.assertTrue(control['should_run'])
+        self.assertFalse(control['should_generate'])
+
     def test_importer_change_forces_inspection_at_same_upstream_version(self):
         with patch.object(snapshots, 'projection_version', return_value='new-projection'):
             control = workflow.inspect_run(self.client, self.workspace, self.base['upstream_sha'], 'schedule')

@@ -1,6 +1,7 @@
 """Fail-closed D1 delta publishing and transaction assertions."""
 
 import json
+import hashlib
 from pathlib import Path
 import random
 import re
@@ -37,6 +38,10 @@ INDEX_NAMES = {
 MIGRATION = snapshots.ROOT / 'cloudflare/migrations/0004_incremental_sync.sql'
 JSON_ROWS_PER_STATEMENT = 250
 MAX_JSON_VALUE_BYTES = 2000000
+PAYLOAD_MIGRATION = snapshots.ROOT / 'cloudflare/migrations/0005_staged_sync_payloads.sql'
+# Transport packing thresholds, never row or release quotas.
+STAGED_REQUEST_BYTES = 1000000
+PAYLOAD_UPLOAD_BYTES = 256000
 
 
 class SyncError(RuntimeError):
@@ -69,6 +74,62 @@ class D1Client:
 
     def batch(self, statements):
         return legacy.execute_d1_batch(self.cfg, statements)
+
+    def upload_payloads(self, statements):
+        return self.batch(statements)
+
+    def payloads_ready(self):
+        rows = self.query("SELECT name,type,sql FROM sqlite_master WHERE (name='OierSyncPayload' AND type='table') OR (tbl_name='OierSyncPayload' AND type='trigger')")
+        if not rows:
+            return False
+        source = PAYLOAD_MIGRATION.read_text()
+        expected = {'OierSyncPayload': re.search(r'CREATE TABLE OierSyncPayload .*?;', source, re.DOTALL).group(0)}
+        expected.update({name: f'CREATE TRIGGER {name} {body}' for name, body in
+                         re.findall(r'CREATE TRIGGER (\w+) (.*?\bEND);', source, re.DOTALL)})
+        if {row['name'] for row in rows} != expected.keys() or any(
+            normalized_sql(row['sql']) != normalized_sql(expected[row['name']]) for row in rows
+        ):
+            raise SyncError('Staged payload schema differs from its immutable definition')
+        return True
+
+    def stage_payloads(self, release_id, payloads):
+        if not self.payloads_ready():
+            raise SyncError('Staged payload migration is required before publication')
+        groups, group, size = [], [], 0
+        for digest, body in payloads.items():
+            item = statement('INSERT INTO OierSyncPayload(release_id,digest,body) VALUES(?,?,?) ON CONFLICT(release_id,digest) DO NOTHING',
+                             [release_id, digest, body])
+            item_size = len(legacy.encode_d1_payload(item))
+            if group and (size + item_size > PAYLOAD_UPLOAD_BYTES or len(group) >= 50):
+                groups.append(group)
+                group, size = [], 0
+            group.append(item)
+            size += item_size
+        if group:
+            groups.append(group)
+        for group in groups:
+            digests = [item['params'][1] for item in group]
+            for attempt in range(1, 4):
+                try:
+                    # Immutable INSERT-or-ignore is idempotent even after a lost
+                    # upload acknowledgement. Core tables are not involved.
+                    self.upload_payloads(group)
+                    rows = self.query('SELECT digest,body FROM OierSyncPayload WHERE release_id=? AND digest IN (' +
+                                      ','.join('?' for _ in digests) + ')', [release_id] + digests)
+                except Exception as error:
+                    if attempt < 3 and legacy.is_retryable_d1_error(error):
+                        time.sleep(2 ** attempt + random.uniform(0, 1))
+                        continue
+                    raise SyncError(f'Payload staging failed before any core writes: {error}',
+                        result={'status': 'blocked', 'publication_attempted': False, 'staging_attempts': attempt,
+                                'error': str(error),
+                                'recovery_action': 'Keep core data unchanged; retry staging after Cloudflare recovers.'}) from error
+                break
+            observed = {row['digest']: row['body'] for row in rows}
+            if observed != {digest: payloads[digest] for digest in digests}:
+                raise SyncError('Staged payload read-back differs from the validated archive')
+        if not self.payloads_ready():
+            raise SyncError('Staged payload schema disappeared before publication')
 
     def release(self):
         return legacy.get_release(self.cfg)
@@ -358,6 +419,31 @@ def build_transaction(base, base_revision, patch, target):
     return commands
 
 
+def prepare_transport(base, revision, target, commands):
+    if len(legacy.encode_d1_payload({'batch': commands})) <= STAGED_REQUEST_BYTES:
+        return commands, {}, None
+    release_id = hashlib.sha256(f"{base['snapshot_commit']}:{revision}:{target['snapshot_commit']}".encode()).hexdigest()
+    rewritten, payloads = [], {}
+    for item in commands:
+        sql, params = item['sql'], list(item['params'])
+        if 'json_each(?)' in sql:
+            bindings = [index for index, value in enumerate(params) if isinstance(value, str) and value.startswith('[')]
+            if len(bindings) != 1:
+                raise SyncError('Unexpected compact payload bindings')
+            index = bindings[0]
+            body = params[index]
+            digest = hashlib.sha256(body.encode()).hexdigest()
+            payloads[digest] = body
+            position = [match.start() for match in re.finditer(r'\?', sql)][index]
+            sql = sql[:position] + '(SELECT body FROM OierSyncPayload WHERE release_id=? AND digest=?)' + sql[position + 1:]
+            params[index:index + 1] = [release_id, digest]
+        rewritten.append(statement(sql, params))
+    closing = next(index for index, item in enumerate(rewritten) if item['sql'].startswith('UPDATE OierSyncState SET writing=0'))
+    rewritten.insert(closing, statement("DELETE FROM OierSyncPayload WHERE release_id=? OR created_at<datetime('now','-7 days')", [release_id]))
+    validate_packet(rewritten)
+    return rewritten, payloads, release_id
+
+
 def publish(client, base, base_revision, patch, target):
     # Retry only a known transient error after read-back proved no commit.
     # The transaction's base/revision guard also protects against a late commit.
@@ -400,6 +486,9 @@ def _publish_once(client, base, base_revision, patch, target):
                     'error': 'The planned base release is stale.',
                     'recovery_action': 'Rerun inspection and planning from the active release.'})
     commands = build_transaction(base, base_revision, patch, target)
+    commands, payloads, release_id = prepare_transport(base, base_revision, target, commands)
+    if payloads:
+        client.stage_payloads(release_id, payloads)
     batch_error = None
     try:
         response = client.batch(commands)

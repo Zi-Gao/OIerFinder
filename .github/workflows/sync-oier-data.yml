@@ -246,8 +246,8 @@ jobs:
                       continue
                   data = json.loads(path.read_text())
                   keys = ("upstream_sha", "should_generate", "needs_bootstrap", "row_operations",
-                          "estimated_writes", "statement_count", "request_bytes", "snapshot_commit", "status", "validation_error", "rows_read", "rows_written",
-                          "publication_attempted", "attempts", "active_snapshot_commit", "error", "verification_error", "recovery_action")
+                          "estimated_writes", "statement_count", "request_bytes", "staged_payloads", "snapshot_commit", "status", "validation_error", "rows_read", "rows_written",
+                          "publication_attempted", "attempts", "staging_attempts", "active_snapshot_commit", "error", "verification_error", "recovery_action")
                   for key in keys:
                       if key in data:
                           summary.write(f"- {key}: `{data[key]}`\n")

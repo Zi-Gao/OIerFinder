@@ -62,12 +62,13 @@ def inspect_run(client, workspace, upstream_sha, event_name, force=False):
     current, revision = client.current(allow_legacy=True)
     projection = snapshots.projection_version()
     needs_bootstrap = not current.get('snapshot_commit')
+    needs_schema = revision is None or not client.payloads_ready()
     should_generate = force or upstream_sha != current['upstream_sha'] or projection != current.get('projection_version')
     control = {
         'upstream_sha': upstream_sha, 'projection_version': projection,
-        'needs_schema': revision is None, 'needs_bootstrap': needs_bootstrap,
+        'needs_schema': needs_schema, 'needs_bootstrap': needs_bootstrap,
         'should_generate': should_generate,
-        'should_run': should_generate or needs_bootstrap or event_name == 'push',
+        'should_run': should_generate or needs_bootstrap or needs_schema or event_name == 'push',
         'event_name': event_name,
         'database': client.identity(),
         'observed_release': sync.release_identity(current),
@@ -133,8 +134,10 @@ def prepare_run(client, repo, workspace, *, database=None, stats=None, source_ha
     if requires_publish:
         try:
             statements = sync.build_transaction(current, revision, patch, target)
+            statements, payloads, _ = sync.prepare_transport(current, revision, target, statements)
             plan['statement_count'] = len(statements)
             plan['request_bytes'] = len(sync.legacy.encode_d1_payload({'batch': statements}))
+            plan['staged_payloads'] = len(payloads)
         except sync.SyncError as error:
             # Keep the reviewed delta visible even when safeguards reject it.
             plan.update(status='blocked', validation_error=str(error))

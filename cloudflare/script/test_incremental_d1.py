@@ -22,6 +22,8 @@ class LocalD1(sync.D1Client):
         self.lose_response = False
         self.before_batch = None
         self.batch_count = 0
+        self.payload_upload_count = 0
+        self.payload_upload_error = None
 
     def query(self, sql, params=()):
         return [dict(row) for row in self.db.execute(sql, params)]
@@ -54,6 +56,20 @@ class LocalD1(sync.D1Client):
         if self.lose_response:
             raise TimeoutError('Committed but response lost')
         return {'result': results}
+
+    def upload_payloads(self, statements):
+        self.payload_upload_count += 1
+        if self.payload_upload_error:
+            raise self.payload_upload_error
+        self.db.execute('BEGIN')
+        try:
+            for item in statements:
+                self.db.execute(item['sql'], item['params'])
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+        return {'result': [{'success': True} for _ in statements]}
 
 
 OLD_ROWS = {
@@ -112,6 +128,7 @@ class PublishingFixture(unittest.TestCase):
         self.client.db.executescript(legacy.RELEASE_SCHEMA)
         self.client.db.execute('ALTER TABLE DataRelease ADD COLUMN source_data_hash TEXT')
         self.client.db.executescript(sync.MIGRATION.read_text())
+        self.client.db.executescript(sync.PAYLOAD_MIGRATION.read_text())
         for table, names in sync.INDEX_NAMES.items():
             for name, columns in zip(names, sync.INDEXES[table]):
                 self.client.db.execute(f'CREATE INDEX {name} ON {table}({", ".join(columns)})')
@@ -180,6 +197,76 @@ class IncrementalPublishingTests(PublishingFixture):
                          [{'estimated_writes': estimate}])
         self.assertEqual(self.publish()['status'], 'already_applied')
         self.assertEqual(self.client.batch_count, 2)
+        self.assertGreater(self.client.payload_upload_count, 0)
+        self.assertEqual(self.client.query('SELECT * FROM OierSyncPayload'), [])
+
+    def test_staged_payloads_are_verified_immutable_and_cleaned_on_commit(self):
+        with patch.object(sync, 'STAGED_REQUEST_BYTES', 1):
+            commands = sync.build_transaction(self.base, 0, self.patch, self.target)
+            prepared, payloads, release_id = sync.prepare_transport(self.base, 0, self.target, commands)
+            self.client.stage_payloads(release_id, payloads)
+            self.assert_old()
+            self.assertTrue(self.client.payloads_ready())
+            digest = next(iter(payloads))
+            with self.assertRaisesRegex(sqlite3.IntegrityError, 'immutable'):
+                self.client.db.execute('UPDATE OierSyncPayload SET body=? WHERE release_id=? AND digest=?', ['[]', release_id, digest])
+            with self.assertRaisesRegex(sqlite3.IntegrityError, 'guarded publisher'):
+                self.client.db.execute('DELETE FROM OierSyncPayload')
+            self.assertTrue(any('SELECT body FROM OierSyncPayload' in item['sql'] for item in prepared))
+            self.assertEqual(self.publish()['status'], 'committed')
+            self.assertEqual(snapshots.read_state(self.old), self.new_state)
+            self.assertEqual(self.client.query('SELECT * FROM OierSyncPayload'), [])
+
+    def test_staging_failure_does_not_attempt_core_publication(self):
+        self.client.payload_upload_error = RuntimeError('Payload upload unavailable')
+        with patch.object(sync, 'STAGED_REQUEST_BYTES', 1):
+            with self.assertRaisesRegex(sync.SyncError, 'before any core writes'):
+                self.publish()
+        self.assert_old()
+        self.assertEqual(self.client.batch_count, 0)
+
+    def test_transient_payload_upload_failure_can_resume_idempotently(self):
+        real_upload = self.client.upload_payloads
+        calls = 0
+        def fail_once(statements):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise legacy.D1RequestError('Internal upload error', 500, [{'code': 7500}])
+            return real_upload(statements)
+        with patch.object(sync, 'STAGED_REQUEST_BYTES', 1), patch.object(sync.time, 'sleep') as sleep:
+            with patch.object(self.client, 'upload_payloads', side_effect=fail_once):
+                self.assertEqual(self.publish()['status'], 'committed')
+        sleep.assert_called_once()
+        self.assertEqual(self.client.batch_count, 1)
+        self.assertEqual(snapshots.read_state(self.old), self.new_state)
+
+    def test_missing_payload_immutability_trigger_blocks_staging(self):
+        self.client.db.execute('DROP TRIGGER oier_sync_payload_immutable')
+        with patch.object(sync, 'STAGED_REQUEST_BYTES', 1):
+            with self.assertRaisesRegex(sync.SyncError, 'immutable definition'):
+                self.publish()
+        self.assert_old()
+        self.assertEqual(self.client.batch_count, 0)
+
+    def test_wrong_preexisting_payload_cannot_be_used_for_publication(self):
+        with patch.object(sync, 'STAGED_REQUEST_BYTES', 1):
+            commands = sync.build_transaction(self.base, 0, self.patch, self.target)
+            _, payloads, release_id = sync.prepare_transport(self.base, 0, self.target, commands)
+            self.client.query('INSERT INTO OierSyncPayload(release_id,digest,body) VALUES(?,?,?)',
+                              [release_id, next(iter(payloads)), '[]'])
+            with self.assertRaisesRegex(sync.SyncError, 'read-back differs'):
+                self.publish()
+        self.assert_old()
+        self.assertEqual(self.client.batch_count, 0)
+
+    def test_missing_staged_payload_rolls_back_the_whole_release(self):
+        with patch.object(sync, 'STAGED_REQUEST_BYTES', 1):
+            commands = sync.build_transaction(self.base, 0, self.patch, self.target)
+            prepared, _, _ = sync.prepare_transport(self.base, 0, self.target, commands)
+            with self.assertRaises(sqlite3.IntegrityError):
+                self.client.batch(prepared)
+        self.assert_old()
 
     def test_compact_group_checks_every_old_row(self):
         rows = {table: [dict(row) for row in data] for table, data in OLD_ROWS.items()}
