@@ -1,20 +1,20 @@
 {
-  "archive_bytes": 7347274,
-  "archive_sha256": "a580cfb040f3405b5a29d4731c2329a5d714bf3404cf04b3f56506b01c8f0d55",
-  "data_hash": "8037f9298f2ef77ef9f06407746abd8c052dc4ffd0809be74635d733459fc985",
+  "archive_bytes": 7347054,
+  "archive_sha256": "348e767b5289559fd1cfd4696e59e2a06b4d4c28e7c9783194a6647d2ad8c088",
+  "data_hash": "4cbdd0ed6d70f3f00fd27f28f16ad2110cff94030ea279f1d064c1556826af6f",
   "database_bytes": 20381696,
-  "database_sha256": "74c2509770bfb595d5f346f279fbff96e911cf3deb28b788d32d051c17959abc",
+  "database_sha256": "b0aedb88a8ba7b1ecf7fe236fae5ee8198a5d99bc981f382b4086273ae617277",
   "format_version": 1,
-  "logical_data_hash": "b3eaebb20b523ffa71d5a898df18deaa085d197bceab2d677383c5ac7a12ac59",
+  "logical_data_hash": "24d99850f497a941b5f79554cd21e529c6aa1a15e189543717cb55e3ff3e5258",
   "projection_version": "126e6f0e02766652b7f06763632558eed7451db4a1f9734edf0d11cddb59818a",
   "row_counts": {
     "Contest": 144,
-    "OIer": 147377,
+    "OIer": 147333,
     "Record": 344800,
     "School": 15693
   },
-  "source_data_hash": "0fb38a5f1c19f8a795f7d240360ba5d003e0fc85bc0526af6e789f780aca2353",
+  "source_data_hash": "409fd702450022c124c5ba2fc1d04790cf944d01ce512cc42800309d639719ae",
   "stats_sha256": "0fea76e7f1bb510b8d467089425fe0f1960cf540b2a8afcb62e3dee54d9cdd20",
-  "upstream_sha": "a19f4699114943a361076c4c3e903bb02cd113cf",
-  "worker_version": "e118ec4aa27470a2490e0a101c41a15b80ae8fd7"
+  "upstream_sha": "fa92913a4d5fb8bfdad16cce6b647a3547241142",
+  "worker_version": "034bcfba0f3d860ec2daa1872c6820ea26baf254"
 }
