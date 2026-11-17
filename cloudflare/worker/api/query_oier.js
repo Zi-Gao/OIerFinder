@@ -1,7 +1,9 @@
 import { parseManifest, readResponseBytes } from '../shared/snapshot.js';
+import { isQueryApiEnabled } from './features.js';
 
 /** Keep the public endpoint, forwarding to the configured snapshot service. */
 export default async function queryOierHandler(c) {
+    if (!isQueryApiEnabled(c.env)) return c.notFound();
     if (!c.env.QUERY_API_ORIGIN) {
         return c.json({ error: 'The HTTP query service is not configured. Website search remains available.' }, 503);
     }

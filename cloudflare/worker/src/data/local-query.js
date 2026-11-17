@@ -15,7 +15,7 @@ function resetWorker(message) {
 function getWorker() {
     if (worker) return worker;
     if (typeof Worker === 'undefined' || typeof WebAssembly === 'undefined') {
-        throw new Error('Your browser does not support local search. Use a current browser or the HTTP API.');
+        throw new Error('Your browser does not support local search. Use a current browser with WebAssembly support.');
     }
     worker = new Worker(new URL('./query.worker.js', import.meta.url), { type: 'module' });
     worker.onerror = () => resetWorker('Local search could not start. Reload the page and try again.');

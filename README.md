@@ -42,9 +42,8 @@
 | 组件 | 技术 | 位置 |
 | --- | --- | --- |
 | 在线前端 | React、Vite、Tailwind CSS | `cloudflare/worker/src/` |
-| HTTP API | Hono、Cloudflare Workers | `cloudflare/worker/api/` |
+| 洛谷与版本 API | Hono、Cloudflare Workers | `cloudflare/worker/api/` |
 | 核心竞赛数据 | 静态 SQLite 快照、浏览器 WASM 查询 | `cloudflare/worker/src/data/` |
-| 查询 API | 独立 Node.js 快照服务、Cloudflare 代理 | `cloudflare/worker/server/` |
 | 洛谷奖项数据库 | Cloudflare D1 | `cloudflare/migrations/` |
 | 本地查询 | Python、SQLite、Flask | 仓库根目录、`utils/` |
 | 上游数据 | Git submodule | `oierdb-data/generator/`、`oierdb-data/data/` |
@@ -60,7 +59,7 @@
 - Git
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/)
-- Node.js 22+（仅开发 Cloudflare Worker 时需要）
+- Node.js 24+（仅开发 Cloudflare Worker 时需要）
 
 ### 1. 获取项目并安装依赖
 
@@ -151,7 +150,7 @@ npx wrangler d1 execute DB --local --file ../migrations/0001_create_luogu_prizes
 npm run dev
 ```
 
-默认访问 `http://localhost:5173`。核心查询需要先生成静态快照；洛谷功能使用独立的本地 D1，不会修改线上数据。完整的数据打包、浏览器缓存及 API 服务启动方式见[静态数据说明](docs/static-snapshots.md)。
+默认访问 `http://localhost:5173`。核心查询需要先生成静态快照；洛谷功能使用独立的本地 D1，不会修改线上数据。完整的数据打包和浏览器缓存说明见[静态数据说明](docs/static-snapshots.md)。
 
 常用检查：
 
@@ -166,29 +165,23 @@ npm run build
 
 ## API
 
-例如，查询 2023 年获得 NOI 金牌的选手：
+核心竞赛查询使用网页内的 UI Builder 或 Raw JSON。当前公开 HTTP API 提供洛谷奖项与版本信息，例如读取已保存的洛谷奖项：
 
 ```bash
-curl -X POST https://of.zigao.ac/query-oier \
-  -H 'Content-Type: application/json' \
-  -d '{"record_filters":[{"contest_type":"NOI","level":"金牌","year":2023}],"oier_filters":{},"limit":20}'
+curl 'https://of.zigao.ac/luogu/prizes?uid=1'
 ```
 
-每个 `record_filters` 条件都需要由该选手的至少一条记录满足，条件之间为 AND。
 完整字段、示例和错误码见 [交互式 API 文档](https://of.zigao.ac/docs)。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `POST` | `/query-oier` | 按记录和选手属性筛选 |
 | `GET` | `/luogu/to_query` | 将洛谷奖项转换为查询条件 |
 | `GET` | `/luogu/prizes` | 查询或同步洛谷奖项 |
-| `GET` | `/version` | 查看应用与 active 上游数据 SHA |
+| `GET` | `/version` | 查看应用与静态快照的上游数据 SHA |
 | `GET` | `/openapi.json` | 获取 OpenAPI 3.1 契约 |
 | `GET` | `/docs` | 打开 Scalar API 文档 |
 
-所有业务接口都可以匿名调用。配置可选的 `X-Admin-Secret` 后，管理员请求可以放宽
-`/query-oier` 的部分资源限制，并在服务端错误响应中看到调试信息。不要在公开客户端
-中保存管理员密钥。
+所有公开业务接口都可以匿名调用。可选的 `X-Admin-Secret` 可在服务端错误响应中提供调试信息。不要在公开客户端中保存管理员密钥。
 
 洛谷接口在使用 `sync=true` 或 `sync=1` 时会从洛谷读取最新奖项并在后台增量写入
 D1。该同步是公开写操作；历史奖项不会因为洛谷当前页面缺失而删除。响应中的
@@ -198,15 +191,15 @@ D1。该同步是公开写操作；历史奖项不会因为洛谷当前页面缺
 
 核心数据使用静态快照发布，不再向 D1 导入选手和成绩。洛谷同步继续读写 D1。
 
-工作流 [`.github/workflows/sync-oier-data.yml`](.github/workflows/sync-oier-data.yml) 保留每日北京时间 09:17、手动运行和相关源码变动三种触发方式。线上工作流在迁移期间保持禁用，完成服务部署和联调后再恢复。
+工作流 [`.github/workflows/sync-oier-data.yml`](.github/workflows/sync-oier-data.yml) 保留每日北京时间 09:17、手动运行和相关源码变动三种触发方式。
 
-发布步骤是：固定上游 SHA、生成完整数据库、校验业务数据与外键、加入查询索引、生成带摘要的压缩分片和 manifest、测试、检查独立 API 服务健康，最后部署静态数据与兼容 Worker。整个流程不执行 D1 核心表发布事务，因此不会因年度 CSP 数据入库产生几十万次 D1 写入。
+发布步骤是：固定上游 SHA、生成完整数据库、校验业务数据与外键、加入查询索引、生成带摘要的压缩分片和 manifest、测试，最后部署静态数据与兼容 Worker。整个流程不执行 D1 核心表发布事务，因此不会因年度 CSP 数据入库产生几十万次 D1 写入。
 
-浏览器首次查询下载并校验数据，后续复用本机缓存；同一查询固定一个完整版本。`POST /query-oier` 仍然保留，由 Cloudflare 代理到独立快照查询服务，查询逻辑与浏览器一致。源站未配置、不可用或尚未加载相同版本时返回 503，不查询旧 D1 核心数据。`GET /version` 报告静态快照对应的上游 SHA。
+浏览器首次查询下载并校验数据，后续复用本机缓存；同一查询固定一个完整版本。`GET /version` 报告静态快照对应的上游 SHA。独立查询服务代码保留，但公开入口和相关 API 文档默认隐藏，发布不依赖该服务。
 
-生产发布需要 `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_WORKERS_API_TOKEN` 和仓库变量 `QUERY_API_ORIGIN`。首次建立洛谷表时可手动选择 `initialize_luogu`，该步骤才使用 `CLOUDFLARE_D1_API_TOKEN`。日常核心数据更新不需要 D1 写入权限。可选的 `QUERY_BACKEND_SECRET` 必须在查询服务、Cloudflare Worker 和健康检查中保持一致。
+生产发布需要 `CLOUDFLARE_ACCOUNT_ID` 和 `CLOUDFLARE_WORKERS_API_TOKEN`。首次建立洛谷表时可手动选择 `initialize_luogu`，该步骤才使用 `CLOUDFLARE_D1_API_TOKEN`。日常核心数据更新不需要 D1 写入权限，也不需要配置查询服务地址。
 
-详细的本地准备、独立 API 部署、首次迁移顺序、版本校验与恢复方式见[静态数据与洛谷 D1](docs/static-snapshots.md)。旧增量同步和全量上传脚本不再用于日常生产发布；不要用它们覆盖仍然保留的历史 D1 核心表。
+详细的本地准备、版本校验与恢复方式见[静态数据与洛谷 D1](docs/static-snapshots.md)。旧增量同步和全量上传脚本不再用于日常生产发布；不要用它们覆盖仍然保留的历史 D1 核心表。
 
 ## 项目结构
 

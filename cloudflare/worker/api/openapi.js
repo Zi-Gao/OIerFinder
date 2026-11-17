@@ -1,3 +1,5 @@
+import { isQueryApiEnabled } from './features.js';
+
 const adminSecurity = [
     {},
     { AdminSecret: [] },
@@ -30,7 +32,7 @@ const errorResponses = {
     },
 };
 
-export const openApiDocument = {
+const completeOpenApiDocument = {
     openapi: '3.1.0',
     info: {
         title: 'OIerFinder API',
@@ -175,7 +177,7 @@ export const openApiDocument = {
                 operationId: 'getLuoguPrizes',
                 summary: '查询洛谷奖项',
                 description: [
-                    '返回指定洛谷用户已经保存的奖项以及可用于 `/query-oier` 的查询条件。',
+                    '返回指定洛谷用户已经保存的奖项以及可导入网页的查询条件。',
                     '设置 `sync=true` 或 `sync=1` 会请求洛谷，并在响应返回后通过后台任务增量写入 D1。该同步是公开写操作，历史奖项不会删除。',
                 ].join('\n\n'),
                 security: adminSecurity,
@@ -604,12 +606,27 @@ export const openApiDocument = {
                     oierdb_data_sha: {
                         type: ['string', 'null'],
                         pattern: '^[0-9a-f]{40}$',
-                        description: 'D1 active 数据发布对应的 OIerDB Data Git SHA。',
+                        description: '当前静态快照对应的 OIerDB Data Git SHA。',
                     },
                 },
             },
         },
     },
 };
+
+export const openApiDocument = structuredClone(completeOpenApiDocument);
+delete openApiDocument.paths['/query-oier'];
+openApiDocument.tags = openApiDocument.tags.filter(tag => tag.name !== 'OIer 查询');
+openApiDocument.info.description = [
+    'OIerFinder Cloudflare Worker 的公开 HTTP API，提供洛谷奖项与版本信息。',
+    '核心竞赛查询在网页浏览器内读取经过校验的静态 SQLite 快照。',
+    '',
+    '洛谷接口在 `sync=true` 或 `sync=1` 时会从洛谷读取最新奖项，并在后台增量写入 D1。历史奖项不会因为上游缺失而删除。',
+].join('\n');
+openApiDocument.components.securitySchemes.AdminSecret.description = '可选管理员密钥，用于在服务端错误响应中附加调试信息；不要保存在公开客户端中。';
+delete openApiDocument.components.schemas.QueryOierRequest;
+delete openApiDocument.components.schemas.QueryOierResponse;
+
+export const getOpenApiDocument = env => isQueryApiEnabled(env) ? completeOpenApiDocument : openApiDocument;
 
 export default openApiDocument;

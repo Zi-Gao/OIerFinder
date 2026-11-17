@@ -11,8 +11,9 @@ const documentedOperations = () => Object.entries(openApiDocument.paths)
         .map(method => `${method.toUpperCase()} ${path}`))
     .sort();
 
-const registeredBusinessOperations = () => app.routes
+const registeredBusinessOperations = (includeQueryApi = false) => app.routes
     .filter(route => !['/docs', '/openapi.json', '/*'].includes(route.path))
+    .filter(route => includeQueryApi || route.path !== '/query-oier')
     .map(route => `${route.method} ${route.path}`)
     .sort();
 
@@ -30,6 +31,18 @@ test('OpenAPI JSON is served before the SPA fallback', async () => {
     assert.match(response.headers.get('content-type'), /^application\/json/);
     assert.match(response.headers.get('cache-control'), /max-age=300/);
     assert.deepEqual(await response.json(), openApiDocument);
+    assert.equal(openApiDocument.paths['/query-oier'], undefined);
+    assert.doesNotMatch(openApiDocument.info.description, /独立服务/);
+});
+
+test('explicitly enabling the retained query API restores its documented contract', async () => {
+    const response = await app.request('/openapi.json', {}, { ENABLE_QUERY_API: 'true' });
+    const document = await response.json();
+    await SwaggerParser.validate(document);
+    const operations = Object.entries(document.paths)
+        .flatMap(([path, pathItem]) => Object.keys(pathItem).map(method => `${method.toUpperCase()} ${path}`))
+        .sort();
+    assert.deepEqual(operations, registeredBusinessOperations(true));
 });
 
 test('Scalar API reference is available at /docs', async () => {

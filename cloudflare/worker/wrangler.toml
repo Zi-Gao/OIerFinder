@@ -2,6 +2,9 @@ name = "oier-finder"
 main = "api/index.js"
 compatibility_date = "2025-09-20"
 
+[vars]
+ENABLE_QUERY_API = "false"
+
 [[routes]]
 pattern = "of.zigao.ac"
 custom_domain = true
