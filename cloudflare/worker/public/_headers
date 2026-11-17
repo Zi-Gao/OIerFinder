@@ -1,0 +1,4 @@
+/data/manifest.json
+  Cache-Control: no-cache
+/data/*
+  X-Content-Type-Options: nosniff

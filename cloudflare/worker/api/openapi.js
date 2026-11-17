@@ -20,15 +20,24 @@ const errorResponses = {
             },
         },
     },
+    503: {
+        description: '查询服务尚未配置、暂时不可用或正在准备当前数据版本。',
+        content: {
+            'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+            },
+        },
+    },
 };
 
 export const openApiDocument = {
     openapi: '3.1.0',
     info: {
         title: 'OIerFinder API',
-        version: '1.0.0',
+        version: '1.1.0',
         description: [
             'OIerFinder Cloudflare Worker 的公开 HTTP API。',
+            '核心竞赛查询由独立服务读取经过校验的静态 SQLite 快照，不再读写 D1 核心表。网页在浏览器内查询同一份快照。',
             '',
             '所有接口都可匿名调用。可选的 `X-Admin-Secret` 仅用于提高查询限制并在错误响应中返回调试信息；不要在公开客户端中保存该密钥。',
             '',
@@ -65,6 +74,7 @@ export const openApiDocument = {
                     '`record_filters` 中的每一项都必须被同一名选手的至少一条获奖记录满足，各项之间为 AND 关系。',
                     '普通请求最多使用 20 个记录过滤器，并且必须达到最低查询强度；管理员请求不受这两项限制。',
                     '返回数量向下取整并限制为最多 100 条。',
+                    '查询服务未配置、不可用或尚未加载当前快照时返回 503，不回退到旧 D1 数据。',
                 ].join('\n\n'),
                 security: adminSecurity,
                 requestBody: {
@@ -203,7 +213,7 @@ export const openApiDocument = {
                 tags: ['版本'],
                 operationId: 'getVersion',
                 summary: '获取当前版本',
-                description: '返回当前部署的 OIerFinder Git SHA，以及 D1 中 active 数据发布对应的 OIerDB Data Git SHA。开发环境或数据尚未发布时字段可能为 `null`。',
+                description: '返回当前部署的 OIerFinder Git SHA，以及静态数据快照对应的 OIerDB Data Git SHA。开发环境或数据尚未发布时字段可能为 `null`。',
                 responses: {
                     200: {
                         description: '获取成功。',

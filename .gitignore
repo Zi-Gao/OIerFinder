@@ -8,3 +8,5 @@ node_modules/
 .wrangler
 .env
 oier_data.db
+cloudflare/worker/public/data/
+cloudflare/worker/.dev.vars

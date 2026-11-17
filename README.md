@@ -24,7 +24,7 @@
 - **选手条件**：进一步按姓名首字母、性别和初中入学年份筛选。
 - **洛谷导入**：查询公开的洛谷奖项认证，将可识别的 NOI 系列奖项转换为查询条件。
 - **多种使用方式**：在线页面、HTTP API、YAML 命令行查询和本地 Flask 页面。
-- **增量同步**：跟踪上游数据，校验快照后仅向 Cloudflare D1 写入变化行。
+- **静态数据更新**：跟踪上游并发布经过校验的 SQLite 快照，网页在浏览器内查询，洛谷奖项继续增量写入 D1。
 
 ### 在线查询
 
@@ -43,7 +43,9 @@
 | --- | --- | --- |
 | 在线前端 | React、Vite、Tailwind CSS | `cloudflare/worker/src/` |
 | HTTP API | Hono、Cloudflare Workers | `cloudflare/worker/api/` |
-| 云端数据库 | Cloudflare D1 | `cloudflare/migrations/` |
+| 核心竞赛数据 | 静态 SQLite 快照、浏览器 WASM 查询 | `cloudflare/worker/src/data/` |
+| 查询 API | 独立 Node.js 快照服务、Cloudflare 代理 | `cloudflare/worker/server/` |
+| 洛谷奖项数据库 | Cloudflare D1 | `cloudflare/migrations/` |
 | 本地查询 | Python、SQLite、Flask | 仓库根目录、`utils/` |
 | 上游数据 | Git submodule | `oierdb-data/generator/`、`oierdb-data/data/` |
 | 自动部署 | GitHub Actions | `.github/workflows/sync-oier-data.yml` |
@@ -145,14 +147,11 @@ uv run python luogu2yml.py \
 ```bash
 cd cloudflare/worker
 npm ci
-npx wrangler d1 migrations apply DB --local
+npx wrangler d1 execute DB --local --file ../migrations/0001_create_luogu_prizes_table.sql
 npm run dev
 ```
 
-默认访问 `http://localhost:5173`。本地开发使用独立的 D1 数据库，上面的迁移命令
-只创建表和同步保护，不会自动导入选手数据，也不会连接或修改线上数据库；仅启动页面
-即可查看界面，查询真实数据需要另行准备本地数据。`create_db.py` 生成的 SQLite
-文件供本地 Python 工具使用，不会自动成为 Worker 的 D1 数据库。
+默认访问 `http://localhost:5173`。核心查询需要先生成静态快照；洛谷功能使用独立的本地 D1，不会修改线上数据。完整的数据打包、浏览器缓存及 API 服务启动方式见[静态数据说明](docs/static-snapshots.md)。
 
 常用检查：
 
@@ -197,128 +196,17 @@ D1。该同步是公开写操作；历史奖项不会因为洛谷当前页面缺
 
 ## 自动同步与部署
 
-工作流
-[`.github/workflows/sync-oier-data.yml`](.github/workflows/sync-oier-data.yml)
-在以下情况运行：
+核心数据使用静态快照发布，不再向 D1 导入选手和成绩。洛谷同步继续读写 D1。
 
-- 每天北京时间 09:17（UTC 01:17）检查一次上游默认分支。
-- 从 GitHub Actions 页面手动运行，可指定完整上游 SHA 或强制重新生成和比较。
-- `main` 分支中的 Worker、迁移、数据脚本或工作流发生变化。
+工作流 [`.github/workflows/sync-oier-data.yml`](.github/workflows/sync-oier-data.yml) 保留每日北京时间 09:17、手动运行和相关源码变动三种触发方式。线上工作流在迁移期间保持禁用，完成服务部署和联调后再恢复。
 
-### 数据变更判断
+发布步骤是：固定上游 SHA、生成完整数据库、校验业务数据与外键、加入查询索引、生成带摘要的压缩分片和 manifest、测试、检查独立 API 服务健康，最后部署静态数据与兼容 Worker。整个流程不执行 D1 核心表发布事务，因此不会因年度 CSP 数据入库产生几十万次 D1 写入。
 
-工作流先比较上游 Git SHA 和入库规则版本。需要检查数据时，再对生成的 `result.txt`、规范化后的
-`static.json` 以及同一版本的省份、奖项和比赛类型编号表计算 `source_data_hash`。
-编号含义变化也会触发数据更新，单纯的生成器代码或 JSON 排版变化不会导致重写：
+浏览器首次查询下载并校验数据，后续复用本机缓存；同一查询固定一个完整版本。`POST /query-oier` 仍然保留，由 Cloudflare 代理到独立快照查询服务，查询逻辑与浏览器一致。源站未配置、不可用或尚未加载相同版本时返回 503，不查询旧 D1 核心数据。`GET /version` 报告静态快照对应的上游 SHA。
 
-| 情况 | 行为 |
-| --- | --- |
-| 上游 SHA 和数据内容都未变化 | 跳过数据构建与上传 |
-| 上游 SHA 变化，但数据内容未变化 | 只推进 active 上游 SHA |
-| 数据内容变化或入库规则变化 | 完整生成并校验快照，仅事务写入新增、修改、删除的行 |
-| 手动 `force=true` | 强制重新生成和比较；不绕过校验，不强制全量上传 |
-| 本仓库部署文件变化 | 测试并部署 Worker，不因此重写核心数据 |
+生产发布需要 `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_WORKERS_API_TOKEN` 和仓库变量 `QUERY_API_ORIGIN`。首次建立洛谷表时可手动选择 `initialize_luogu`，该步骤才使用 `CLOUDFLARE_D1_API_TOKEN`。日常核心数据更新不需要 D1 写入权限。可选的 `QUERY_BACKEND_SECRET` 必须在查询服务、Cloudflare Worker 和健康检查中保持一致。
 
-完整数据在 Runner 上生成，差异在本地计算。`Record` 按 `(oier_uid, contest_id)`
-比较，忽略重建时会变化的自增 `id`，保留线上已有记录的内部编号。选手合并或拆分
-产生的旧行删除和新行插入也包含在差量中。`LuoguPrizes` 独立维护，不参与核心发布。
-
-### 快照与发布状态
-
-工作流自动创建同仓库的独立 `data-state` 分支，存放以下文件：
-
-```text
-oier_data.db.gz       # 规范排序的四张核心表，不包含连接凭据或其他表
-contest_stats.json   # 与该快照逐项核对的 Worker 统计
-manifest.json        # 文件校验、业务数据校验、入库规则版本、来源与行数
-```
-
-先保存不可变候选 commit，再部署兼容 Worker，最后在同一个 D1 事务中应用差量、
-校验结果并更新 `DataRelease.snapshot_commit`。D1 的指针是成功基准，分支 HEAD
-可能是尚未发布的候选版本，不能直接当成线上状态。上传失败不写核心表；事务失败
-保留旧数据与旧指针；响应丢失后先查询发布记录，禁止盲目重发。
-
-首次接入只读线上核心表制作基准，确认读取期间版本和变更计数未变化，存档成功后
-才补上快照指针；不会重写已有核心数据。没有已有 `active` 发布记录、基准损坏或
-缺失时会停止，不自动尝试全量覆盖空库或修复不明状态。
-
-迁移 `0004` 为核心表增加事务内写入门禁和变更计数触发器。旧脚本和未开启门禁的
-直接写入会被拒绝；发布器在同一事务中开启门禁、写入并关闭门禁。每次增删改都会
-在同一事务里推进计数。
-大差量通过 JSON 参数打包为批量 SQL，每组保留逐行业务键、旧值和写入结果校验，
-减少语句解析和响应数量。所有分组仍由同一个 D1 batch 原子提交，不拆分正式表事务。
-参数按列位置压缩并用 UTF-8 发送，避免重复字段名及中文转义放大请求。
-较大的请求先把参数分段上传至 `OierSyncPayload`，逐组读取核对；该表禁止修改，
-删除仅能在受保护的发布事务内执行。最终事务仅引用已核对参数，成功后同时清理暂存。
-参数打包大小不限制整批发布数量；暂存或最终发布失败均不会留下部分核心数据更新。
-每次成功的暂存发布会清理本批参数及超过七天的旧暂存参数。
-线上计数与成功快照不符、保护表/触发器/索引被改动时停止发布。每条差量都有旧值、
-唯一性和写入结果断言，数据、发布指针和估算写入记账一起提交或回滚。
-命令行入口会核对目标库与 Worker 的 `DB` 绑定一致；计划还绑定具体账号和数据库，
-防止准备后更换环境把差量写到另一个库。
-
-项目不设置单次或每日写入额度，也不额外限制业务行操作数或设置 4 MiB 请求阈值。
-计划中的估算写入及历史命名为 `OierSyncBudget` 的日累计记录仅用于审计，不拦截发布；
-旧的 `D1_SYNC_MAX_ESTIMATED_WRITES`、`D1_SYNC_DAILY_WRITE_BUDGET` 配置已移除。
-每条 SQL 仍校验 D1 的
-100,000 字节及 100 个绑定参数限制，整批请求受服务端 30 秒执行时限等
-[平台限制](https://developers.cloudflare.com/d1/platform/limits/)约束。
-估算包含断言、变更计数和索引开销，不等同 Cloudflare 账单。实际可用额度由
-[Cloudflare 套餐与账号总用量](https://developers.cloudflare.com/d1/platform/pricing/)决定。
-校验失败或 Cloudflare 拒绝写入时保留失败记录，不拆分正式表事务或回退全量上传。
-`publish-result.json` 和工作流摘要会区分以下状态：
-
-- `blocked`：发布前处理或校验失败，未尝试写核心表。
-- `not_committed`：写入失败后已重新读取并确认旧发布仍有效，下次从该成功快照重新规划。
-- `outcome_unknown`：超时或响应异常后暂时无法确认结果，停止写入；后续先读取 D1 发布记录再决定是否更新。
-- `conflict`：核验到非预期的发布身份，停止并要求审计。
-- `committed_response_lost`：响应丢失，但重新读取确认目标已提交，不重复写入。
-
-Cloudflare 7500、7429、网络连接等暂时性错误，只有重新读取确认本次未提交，才会延迟重试，
-最多尝试三次；每次重试仍核对成功基准，并受同一事务的发布身份与变更计数断言保护。
-Worker 部署使用锁定依赖中的 Wrangler；10013 或网络类暂时错误会延迟重试，最多三次。
-失败的 job 保持失败状态，同时保存计划、错误、尝试次数和恢复建议。Cloudflare 配额耗尽时不立即循环重试；
-下次每日任务会先核验线上发布状态，再从实际成功版本比较上游。
-
-数据分支采用普通追加提交，不强推或自动改写历史。旧快照属于 Git 历史；保留策略
-需要另行规划，必须保留 D1 当前引用的 commit。Runner 的 SQLite 与下载快照在
-结束时清理；Actions 的审计 artifact 只保留清单、差量数量和实际读写统计 14 天。
-
-核心实现及测试位于 `cloudflare/script/incremental_sync.py`、`incremental_d1.py`、
-`sync_snapshot.py` 及对应 `test_*.py`。`prepare` 只规划和建立首次基准，`archive`
-只保存候选，`publish` 才能写核心表。Worker 与 D1 不属于跨服务事务，新 Worker
-必须兼容发布前的旧数据。
-
-### GitHub Environment
-
-创建名为 `production` 的 Environment，并配置：
-
-| Secret | 用途 |
-| --- | --- |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 账号 ID |
-| `CLOUDFLARE_DATABASE_ID` | 目标 D1 数据库 ID |
-| `CLOUDFLARE_D1_API_TOKEN` | 仅用于 D1 读写 |
-| `CLOUDFLARE_WORKERS_API_TOKEN` | 构建并部署 Worker |
-
-保存快照的 job 需要 `contents: write`；`data-state` 的分支规则须允许该 Action
-普通推送。工作流仍只监听 `main` 的 push，数据分支提交不会递归触发同步。
-
-建议按目标账号和资源限制 Token 权限。Worker 的可选 `ADMIN_SECRET` 应通过 Cloudflare
-Secret 单独配置，工作流部署使用 `--keep-vars` 保留现有变量与 Secret。
-
-### 手动部署
-
-生产数据发布使用同一个受保护的 GitHub Actions 流程。可以在 Actions 页面手动运行，
-也可以通过 GitHub CLI 触发：
-
-```bash
-gh workflow run sync-oier-data.yml --ref main -f force=true
-```
-
-旧的 `update_cloudflare.py` 全量上传路径不再用于日常生产发布。旧上传器默认拒绝
-全量写入；显式 `--allow-initial-full-upload` 只保留给尚未安装增量保护的旧式初始导入。
-安装 `0004` 后，即使还没建立快照指针，也会在上传暂存表之前拒绝旧路径。不要
-通过手工改动 `DataRelease` 或写入门禁来跳过基准或漂移检查。
+详细的本地准备、独立 API 部署、首次迁移顺序、版本校验与恢复方式见[静态数据与洛谷 D1](docs/static-snapshots.md)。旧增量同步和全量上传脚本不再用于日常生产发布；不要用它们覆盖仍然保留的历史 D1 核心表。
 
 ## 项目结构
 
@@ -327,7 +215,7 @@ gh workflow run sync-oier-data.yml --ref main -f force=true
 ├── .github/workflows/       # 自动同步与部署
 ├── cloudflare/
 │   ├── migrations/          # D1 migrations
-│   ├── script/              # D1 上传、指纹和索引脚本
+│   ├── script/              # 静态快照构建、指纹及历史 D1 工具
 │   └── worker/
 │       ├── api/             # Hono API 与 OpenAPI
 │       └── src/             # React 前端

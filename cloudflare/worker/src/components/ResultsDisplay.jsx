@@ -84,7 +84,7 @@ function ResultsDisplay({ results, error, loading }) {
           contentClassName="p-0"
           action={
             <Badge variant="outline" className="bg-background text-primary border-muted/50 font-bold uppercase tracking-widest text-[9px] px-2.5">
-              LIVE DATA
+              {results.offline ? 'SAVED DATA' : 'DATA SNAPSHOT'}
             </Badge>
           }
         >

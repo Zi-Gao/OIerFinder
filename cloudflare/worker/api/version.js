@@ -10,13 +10,10 @@ export async function getVersionInfo(env) {
     let activeRelease = null;
 
     try {
-        activeRelease = await env.DB.prepare(`
-            SELECT upstream_sha
-            FROM DataRelease
-            WHERE id = 1 AND status = 'active'
-        `).first();
+        const response = await env.ASSETS.fetch(new Request('https://assets.local/data/manifest.json'));
+        if (response.ok) activeRelease = await response.json();
     } catch (error) {
-        console.error('Failed to read the active OIerDB data version:', error);
+        console.error('Failed to read the static OIerDB data version:', error.message);
     }
 
     return {

@@ -52,6 +52,7 @@ function App() {
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [dataProgress, setDataProgress] = useState(null);
 
   // --- 全局设置状态 ---
   const [adminSecret, setAdminSecret] = useState('');
@@ -97,6 +98,7 @@ function App() {
     setLoading(true);
     setError('');
     setResults(null);
+    setDataProgress({ phase: 'checking' });
 
     try {
       if (!Array.isArray(currentRecordFilters)) {
@@ -139,7 +141,12 @@ function App() {
         limit: Math.min(Math.floor(requestedLimit), 100)
       };
 
-      const data = await searchOiers(payload, adminSecret);
+      const data = await searchOiers(payload, adminSecret, (progress) => {
+        setDataProgress(progress);
+        if (progress.manifest) {
+          setVersionInfo({ oierfinder_sha: progress.manifest.worker_version, oierdb_data_sha: progress.manifest.upstream_sha });
+        }
+      });
       setResults(data);
       if (data.data.length === 0) {
         toast.info("No results found.");
@@ -151,6 +158,7 @@ function App() {
       toast.error(err.message);
     } finally {
       setLoading(false);
+      setDataProgress(null);
     }
   };
 
@@ -291,6 +299,20 @@ function App() {
               </TabsContent>
             </Tabs>
 
+            {loading && dataProgress && (
+              <div role="status" aria-live="polite" className="space-y-2 px-1 text-sm text-muted-foreground">
+                <p>{dataProgress.phase === 'downloading'
+                  ? `Downloading search data… ${Math.min(100, Math.round(dataProgress.loaded / dataProgress.total * 100))}%`
+                  : dataProgress.phase === 'preparing' ? 'Preparing search data…'
+                    : dataProgress.phase === 'querying' ? 'Searching saved data…' : 'Checking search data…'}</p>
+                {dataProgress.phase === 'downloading' && (
+                  <>
+                    <progress aria-label="Search data download" value={dataProgress.loaded} max={dataProgress.total} className="h-2 w-full accent-primary" />
+                    <p className="text-sm">This first download is saved on your device when storage is available.</p>
+                  </>
+                )}
+              </div>
+            )}
             <ResultsDisplay results={results} error={error} loading={loading} />
           </main>
         </div>
@@ -314,7 +336,7 @@ function App() {
                   Professional Search Infrastructure
                 </p>
                 <p className="text-xs text-muted-foreground/70 font-medium leading-relaxed">
-                  Fully powered by Cloudflare serverless edge and D1 database. All data is aggregated from public records, ensuring extreme performance and low-latency precision for the competitive programming community.
+                  Search public competition data on your device. Luogu prize synchronization is provided by Cloudflare and D1.
                 </p>
               </div>
             </div>

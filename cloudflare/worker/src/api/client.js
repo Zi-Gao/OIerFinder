@@ -1,4 +1,5 @@
-// src/api/client.js
+import { searchLocalSnapshot } from '../data/local-query.js';
+import { parseManifest } from '../../shared/snapshot.js';
 
 // Helper to construct headers
 const getHeaders = (adminSecret) => {
@@ -10,28 +11,11 @@ const getHeaders = (adminSecret) => {
   return headers;
 };
 
-export const searchOiers = async (payload, adminSecret) => {
-  const headers = getHeaders(adminSecret);
-  headers['Content-Type'] = 'application/json';
-
-  const response = await fetch('/query-oier', {
-    method: 'POST',
-    headers: headers,
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ message: response.statusText }));
-    throw new Error(`API Error (${response.status}): ${errorData.error || errorData.message}`);
-  }
-  return response.json();
-};
+export const searchOiers = (payload, _adminSecret, onProgress) => searchLocalSnapshot(payload, onProgress);
 
 export const getVersionInfo = async () => {
-  const response = await fetch('/version');
-  if (!response.ok) {
-    throw new Error(`Version API Error (${response.status})`);
-  }
-  return response.json();
+  const manifest = await parseManifest(await fetch('/data/manifest.json', { cache: 'no-cache' }));
+  return { oierfinder_sha: manifest.worker_version, oierdb_data_sha: manifest.upstream_sha };
 };
 
 export const getLuoguPrizes = async (uid, adminSecret) => {
